@@ -9,6 +9,7 @@ This script provides a complete training pipeline for the HRM model including:
 - Progress tracking
 """
 
+import argparse
 import math
 import os
 import time
@@ -32,11 +33,13 @@ class HRMTrainer:
         q_learning_rate: float = 1e-3,
         weight_decay: float = 0.01,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        print_every: int = 10,
     ):
         self.model = model.to(device)
         self.device = device
         self.learning_rate = learning_rate
         self.q_learning_rate = q_learning_rate
+        self.print_every = print_every
 
         # Separate optimizers for different components
         self.lm_optimizer = optim.AdamW(
@@ -206,6 +209,16 @@ class HRMTrainer:
 
             num_batches += 1
 
+            # Print progress every n steps
+            if self.step % self.print_every == 0:
+                print(
+                    f"Step {self.step}: Loss = {metrics['total_loss']:.4f}, "
+                    f"Acc = {metrics['accuracy']:.3f}, "
+                    f"Steps = {metrics['avg_steps']:.1f}, "
+                    f"Q-continue = {metrics['q_continue_mean']:.3f}, "
+                    f"Q-halt = {metrics['q_halt_mean']:.3f}"
+                )
+
         # Average metrics
         for key in total_metrics:
             total_metrics[key] /= num_batches
@@ -243,6 +256,7 @@ def train_model(
     weight_decay: float = 0.01,
     save_dir: str = "./checkpoints",
     device: str = None,
+    print_every: int = 10,
 ):
     """
     Train the HRM model with the specified parameters.
@@ -255,12 +269,14 @@ def train_model(
         weight_decay: Weight decay for regularization
         save_dir: Directory to save checkpoints
         device: Device to use for training
+        print_every: Print progress every n steps
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     print(f"Training on device: {device}")
     print(f"CUDA available: {torch.cuda.is_available()}")
+    print(f"Printing progress every {print_every} steps")
 
     # Create data loaders
     print("Creating data loaders...")
@@ -297,6 +313,7 @@ def train_model(
         q_learning_rate=q_learning_rate,
         weight_decay=weight_decay,
         device=device,
+        print_every=print_every,
     )
 
     # Create save directory
@@ -356,7 +373,48 @@ def train_model(
     return trainer, test_metrics
 
 
-if __name__ == "__main__":
+def main():
+    """Main function with command line argument parsing."""
+    parser = argparse.ArgumentParser(description="Train HRM model")
+    parser.add_argument(
+        "--epochs", type=int, default=5, help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=16, help="Batch size for training"
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=1e-4,
+        help="Learning rate for language modeling",
+    )
+    parser.add_argument(
+        "--q_learning_rate",
+        type=float,
+        default=1e-3,
+        help="Learning rate for Q-learning",
+    )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=0.01,
+        help="Weight decay for regularization",
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default="./hrm_checkpoints",
+        help="Directory to save checkpoints",
+    )
+    parser.add_argument(
+        "--device", type=str, default=None, help="Device to use (cuda/cpu)"
+    )
+    parser.add_argument(
+        "--print_every", type=int, default=10, help="Print progress every n steps"
+    )
+
+    args = parser.parse_args()
+
     # Set random seeds for reproducibility
     torch.manual_seed(42)
     if torch.cuda.is_available():
@@ -364,14 +422,20 @@ if __name__ == "__main__":
 
     # Train the model
     trainer, test_metrics = train_model(
-        num_epochs=5,
-        batch_size=16,  # Smaller batch size for memory efficiency
-        learning_rate=1e-4,
-        q_learning_rate=1e-3,
-        weight_decay=0.01,
-        save_dir="./hrm_checkpoints",
+        num_epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        q_learning_rate=args.q_learning_rate,
+        weight_decay=args.weight_decay,
+        save_dir=args.save_dir,
+        device=args.device,
+        print_every=args.print_every,
     )
 
     print("\nTraining completed!")
     print(f"Final test accuracy: {test_metrics['accuracy']:.3f}")
     print(f"Final test loss: {test_metrics['total_loss']:.4f}")
+
+
+if __name__ == "__main__":
+    main()

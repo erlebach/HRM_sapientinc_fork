@@ -23,7 +23,7 @@ def basic_model_example():
         num_heads=4,
         intermediate_size=512,
         max_seq_len=32,
-        num_puzzle_ids=10,
+        num_puzzle_ids=100,  # Match dataset range
         h_layers=1,
         l_layers=1,
         h_cycles=1,
@@ -38,7 +38,7 @@ def basic_model_example():
     # Create dummy inputs
     batch_size, seq_len = 2, 10
     input_ids = torch.randint(0, 1000, (batch_size, seq_len))
-    puzzle_ids = torch.randint(0, 10, (batch_size,))
+    puzzle_ids = torch.randint(0, 100, (batch_size,))  # Match model range
 
     print(f"Input shape: {input_ids.shape}")
     print(f"Puzzle IDs: {puzzle_ids.tolist()}")
@@ -92,7 +92,7 @@ def training_example():
         num_heads=4,
         intermediate_size=256,
         max_seq_len=16,
-        num_puzzle_ids=10,
+        num_puzzle_ids=100,  # Match dataset range
         h_layers=1,
         l_layers=1,
         h_cycles=1,
@@ -137,7 +137,7 @@ def inference_example():
         num_heads=4,
         intermediate_size=512,
         max_seq_len=32,
-        num_puzzle_ids=10,
+        num_puzzle_ids=100,  # Match dataset range
         h_layers=2,
         l_layers=2,
         h_cycles=2,
@@ -189,7 +189,7 @@ def model_analysis():
         num_heads=8,
         intermediate_size=1024,
         max_seq_len=64,
-        num_puzzle_ids=100,
+        num_puzzle_ids=100,  # Match dataset range
         h_layers=4,
         l_layers=4,
         h_cycles=2,
