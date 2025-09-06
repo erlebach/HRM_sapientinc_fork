@@ -1,0 +1,195 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+## Code Simplification and Clarity
+
+### Remove Unnecessary Complexity
+- **No Type Casting**: Use standard float32 throughout, avoid complex dtype conversions
+- **No Pydantic**: Use simple function arguments instead of configuration classes
+- **No Advanced Optimizations**: Prioritize clarity over efficiency (gradient checkpointing, mixed precision, etc.)
+- **Minimal Dependencies**: Only include what's actually needed (e.g., torch but not torchvision)
+
+### Educational Focus
+- **Comprehension over Efficiency**: Write code that's easy to understand rather than maximally optimized
+- **Self-contained Functions**: Prefer long argument lists over complex configuration objects
+- **Clear Naming**: Use descriptive variable and function names that explain intent
+- **Comprehensive Comments**: Explain the "why" behind complex logic, not just the "what"
+
+## Code Organization and Structure
+
+### File Organization
+- **Single Responsibility**: Each file should have one clear purpose
+- **Logical Grouping**: Group related functionality together (model, dataset, training, evaluation)
+- **Clear Separation**: Keep model definition, data loading, training, and evaluation separate
+
+### Function Design
+- **Long Argument Lists**: Favor explicit parameters over configuration dictionaries
+- **Type Hints**: Use type hints for all function arguments and return values
+- **Docstrings**: Include comprehensive docstrings explaining purpose, arguments, and return values
+- **Default Parameters**: Provide sensible defaults for optional parameters
+
+## Model Architecture Principles
+
+### Hierarchical Design
+- **Clear Module Separation**: Separate high-level (H) and low-level (L) reasoning modules
+- **Explicit State Management**: Make carry states and state transitions explicit
+- **Adaptive Computation**: Implement Q-learning for halting decisions clearly
+- **Input Injection**: Make the hierarchical information flow obvious
+
+### Implementation Patterns
+- **Stateless Functions**: Prefer pure functions where possible (e.g., rms_norm)
+- **Module Composition**: Build complex models from simple, composable components
+- **Clear Forward Pass**: Make the data flow through the model explicit and traceable
+
+## Data Handling
+
+### Dataset Design
+- **Simple Generation**: Use straightforward data generation over complex loading
+- **Clear Structure**: Make data format and tokenization explicit
+- **Educational Examples**: Include diverse, understandable examples
+- **Self-contained**: Don't rely on external data files or complex preprocessing
+
+### Data Flow
+- **Explicit Batching**: Make batch creation and handling clear
+- **Simple Tokenization**: Use basic tokenization that's easy to understand
+- **Clear Interfaces**: Define clear interfaces between data loading and model
+
+## Training and Evaluation
+
+### Training Loop Design
+- **Explicit Loss Computation**: Make loss calculation clear and separate components
+- **Clear Metrics**: Track and display meaningful metrics
+- **Simple Optimization**: Use standard optimizers with clear parameter separation
+- **Progress Tracking**: Provide clear progress indicators and logging
+
+### Evaluation Patterns
+- **Comprehensive Testing**: Include structure tests that work without dependencies
+- **Clear Examples**: Provide working examples that demonstrate usage
+- **Interactive Demos**: Include interactive capabilities for exploration
+
+## Documentation and Examples
+
+### Documentation Standards
+- **Comprehensive README**: Include complete setup and usage instructions
+- **Code Comments**: Explain complex logic and design decisions
+- **Architecture Diagrams**: Provide visual representations of the model
+- **Usage Examples**: Include clear, working examples
+
+### Example Design
+- **Progressive Complexity**: Start with simple examples and build up
+- **Self-contained**: Examples should work independently
+- **Educational Value**: Each example should teach something specific
+- **Clear Output**: Make example output informative and understandable
+
+## Testing and Validation
+
+### Structure Testing
+- **Dependency-free Tests**: Include tests that work without external dependencies
+- **Syntax Validation**: Verify code syntax and structure
+- **Import Testing**: Test that modules can be imported correctly
+- **File Structure**: Validate that all required files exist
+
+### Functional Testing
+- **End-to-end Tests**: Test complete workflows from data to model to evaluation
+- **Error Handling**: Include proper error handling and informative error messages
+- **Edge Cases**: Test with small datasets and edge cases
+
+## Code Style and Formatting
+
+### Python Style
+- **Black Formatting**: Use consistent formatting with proper line breaks
+- **Type Hints**: Include type hints for all functions and methods
+- **Docstrings**: Use Google-style docstrings with proper formatting
+- **Import Organization**: Organize imports logically (standard library, third-party, local)
+
+### Naming Conventions
+- **Descriptive Names**: Use names that clearly indicate purpose
+- **Consistent Patterns**: Follow consistent naming patterns throughout
+- **Avoid Abbreviations**: Use full words instead of abbreviations when possible
+- **Clear Distinctions**: Make similar concepts clearly distinguishable
+
+## Error Handling and Robustness
+
+### Error Messages
+- **Informative Errors**: Provide clear, actionable error messages
+- **Context Information**: Include relevant context in error messages
+- **Graceful Degradation**: Handle missing dependencies gracefully
+- **Clear Instructions**: Tell users how to fix problems
+
+### Validation
+- **Input Validation**: Validate inputs at function boundaries
+- **Type Checking**: Use type hints and runtime checks where appropriate
+- **Range Checking**: Validate parameter ranges and constraints
+- **Dependency Checking**: Check for required dependencies and provide helpful messages
+
+## Performance Considerations
+
+### Educational vs Production
+- **Clarity First**: Prioritize understanding over performance
+- **Reasonable Defaults**: Use reasonable default parameters for educational use
+- **Memory Awareness**: Be aware of memory usage but don't over-optimize
+- **Scalability Notes**: Document when and how to scale for production use
+
+### Optimization Guidelines
+- **Profile Before Optimizing**: Understand bottlenecks before optimizing
+- **Document Trade-offs**: Explain performance vs clarity trade-offs
+- **Provide Options**: Give users options for different performance levels
+- **Clear Benchmarks**: Provide clear performance expectations
+
+## Project Structure
+
+### Directory Organization
+- **Logical Grouping**: Group related files together
+- **Clear Naming**: Use descriptive directory and file names
+- **Minimal Structure**: Keep directory structure simple and flat when possible
+- **Documentation**: Include documentation at appropriate levels
+
+### File Naming
+- **Descriptive Names**: Use names that clearly indicate content
+- **Consistent Patterns**: Follow consistent naming patterns
+- **Avoid Special Characters**: Use standard characters in file names
+- **Clear Extensions**: Use appropriate file extensions
+
+## Integration and Dependencies
+
+### Dependency Management
+- **Minimal Dependencies**: Only include what's actually needed
+- **Clear Requirements**: Document all dependencies clearly
+- **Version Pinning**: Pin dependency versions for reproducibility
+- **Optional Dependencies**: Make optional dependencies truly optional
+
+### Installation
+- **Simple Setup**: Provide simple installation instructions
+- **Dependency Checking**: Check for dependencies and provide helpful messages
+- **Multiple Options**: Provide multiple installation methods when appropriate
+- **Clear Prerequisites**: Document all prerequisites clearly
+
+## Documentation Standards
+
+### README Requirements
+- **Quick Start**: Include clear quick start instructions
+- **Complete Examples**: Provide working examples
+- **Architecture Overview**: Explain the model architecture
+- **Troubleshooting**: Include common problems and solutions
+
+### Code Documentation
+- **Function Docstrings**: Include comprehensive docstrings
+- **Class Documentation**: Document class purpose and usage
+- **Module Documentation**: Include module-level documentation
+- **Example Usage**: Include usage examples in docstrings
+
+## Testing Standards
+
+### Test Coverage
+- **Structure Tests**: Test file structure and imports
+- **Functional Tests**: Test core functionality
+- **Example Tests**: Test that examples work
+- **Integration Tests**: Test complete workflows
+
+### Test Organization
+- **Clear Test Names**: Use descriptive test names
+- **Independent Tests**: Make tests independent of each other
+- **Fast Tests**: Keep tests fast and focused
+- **Clear Assertions**: Use clear, informative assertions
