@@ -7,22 +7,34 @@ have been removed in favor of straightforward PyTorch code.
 """
 
 import math
-from typing import Dict, List, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from beartype import beartype
+from jaxtyping import Float, Int
+from torch import Tensor
 
 
-def rms_norm(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+@beartype
+def rms_norm(
+    x: Float[Tensor, "batch seq hidden"], eps: float = 1e-5
+) -> Float[Tensor, "batch seq hidden"]:
     """Root Mean Square normalization without learnable parameters."""
     variance = x.square().mean(-1, keepdim=True)
     return x * torch.rsqrt(variance + eps)
 
 
+@beartype
 def apply_rotary_pos_emb(
-    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    q: Float[Tensor, "batch heads seq head_dim"],
+    k: Float[Tensor, "batch heads seq head_dim"],
+    cos: Float[Tensor, "seq head_dim"],
+    sin: Float[Tensor, "seq head_dim"],
+) -> tuple[
+    Float[Tensor, "batch heads seq head_dim"], Float[Tensor, "batch heads seq head_dim"]
+]:
     """Apply rotary position embeddings to query and key tensors."""
 
     def rotate_half(x):
@@ -34,6 +46,7 @@ def apply_rotary_pos_emb(
     return q_embed, k_embed
 
 
+@beartype
 class RotaryEmbedding(nn.Module):
     """Rotary position embeddings for transformer attention."""
 
@@ -46,10 +59,13 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("cos_cached", emb.cos())
         self.register_buffer("sin_cached", emb.sin())
 
-    def forward(self, seq_len: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, seq_len: int
+    ) -> tuple[Float[Tensor, "seq head_dim"], Float[Tensor, "seq head_dim"]]:
         return self.cos_cached[:seq_len], self.sin_cached[:seq_len]
 
 
+@beartype
 class MultiHeadAttention(nn.Module):
     """Multi-head self-attention with rotary position embeddings."""
 
@@ -63,7 +79,9 @@ class MultiHeadAttention(nn.Module):
         self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.rotary_emb = RotaryEmbedding(self.head_dim, max_seq_len)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
         batch_size, seq_len, _ = x.shape
 
         # Project to Q, K, V
@@ -96,6 +114,7 @@ class MultiHeadAttention(nn.Module):
         return self.out_proj(attn_output)
 
 
+@beartype
 class SwiGLU(nn.Module):
     """SwiGLU activation function with gated linear unit."""
 
@@ -105,12 +124,15 @@ class SwiGLU(nn.Module):
         self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
         self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
         gate = self.gate_proj(x)
         up = self.up_proj(x)
         return self.down_proj(F.silu(gate) * up)
 
 
+@beartype
 class TransformerBlock(nn.Module):
     """Single transformer block with self-attention and MLP."""
 
@@ -121,7 +143,9 @@ class TransformerBlock(nn.Module):
         self.attention = MultiHeadAttention(hidden_size, num_heads, max_seq_len)
         self.mlp = SwiGLU(hidden_size, intermediate_size)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
         # Self-attention with residual connection and RMS norm
         x = x + self.attention(x)
         x = rms_norm(x)
@@ -133,6 +157,7 @@ class TransformerBlock(nn.Module):
         return x
 
 
+@beartype
 class ReasoningModule(nn.Module):
     """High-level or Low-level reasoning module with multiple transformer blocks."""
 
@@ -153,8 +178,10 @@ class ReasoningModule(nn.Module):
         )
 
     def forward(
-        self, hidden_states: torch.Tensor, input_injection: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        hidden_states: Float[Tensor, "batch seq hidden"],
+        input_injection: Float[Tensor, "batch seq hidden"],
+    ) -> Float[Tensor, "batch seq hidden"]:
         # Add input injection (this is the key difference from standard transformers)
         hidden_states = hidden_states + input_injection
 
@@ -165,6 +192,7 @@ class ReasoningModule(nn.Module):
         return hidden_states
 
 
+@beartype
 class HRMModel(nn.Module):
     """
     Hierarchical Reasoning Model with High-level and Low-level reasoning modules.
@@ -223,8 +251,10 @@ class HRMModel(nn.Module):
             self.q_head.bias.fill_(-5.0)  # Bias toward continuing
 
     def get_embeddings(
-        self, input_ids: torch.Tensor, puzzle_ids: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        input_ids: Int[Tensor, "batch seq"],
+        puzzle_ids: Int[Tensor, "batch"],
+    ) -> Float[Tensor, "batch seq hidden"]:
         """Get input embeddings with puzzle-specific conditioning."""
         # Token embeddings
         token_emb = self.token_embedding(input_ids)
@@ -243,10 +273,14 @@ class HRMModel(nn.Module):
 
     def forward_single_step(
         self,
-        h_state: torch.Tensor,
-        l_state: torch.Tensor,
-        input_embeddings: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        h_state: Float[Tensor, "batch seq hidden"],
+        l_state: Float[Tensor, "batch seq hidden"],
+        input_embeddings: Float[Tensor, "batch seq hidden"],
+    ) -> tuple[
+        Float[Tensor, "batch seq hidden"],
+        Float[Tensor, "batch seq hidden"],
+        Float[Tensor, "batch 2"],
+    ]:
         """
         Single forward step through the hierarchical reasoning process.
 
@@ -275,14 +309,15 @@ class HRMModel(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        puzzle_ids: torch.Tensor,
-        h_state: torch.Tensor = None,
-        l_state: torch.Tensor = None,
-        max_steps: int = None,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Forward pass through the HRM model with adaptive computation time.
+        input_ids: Int[Tensor, "batch seq"],
+        puzzle_ids: Int[Tensor, "batch"],
+        h_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
+        l_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
+        max_steps: Optional[int] = None,
+    ) -> dict[str, Tensor]:
+        """Execute forward pass through the HRM model.
+
+        - includes adaptive computation time.
 
         Args:
             input_ids: Input token IDs [batch, seq]
@@ -348,6 +383,7 @@ class HRMModel(nn.Module):
         }
 
 
+@beartype
 def create_hrm_model(
     vocab_size: int = 1000,
     hidden_size: int = 512,
