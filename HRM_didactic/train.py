@@ -13,13 +13,15 @@ import argparse
 import math
 import os
 import time
-from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from beartype import beartype
 from hrm_model import HRMModel, create_hrm_model
+from jaxtyping import Float, Int
 from puzzle_dataset import PuzzleDataset, create_data_loaders
+from torch import Tensor
 from torch.utils.data import DataLoader
 
 
@@ -63,9 +65,10 @@ class HRMTrainer:
         self.epoch = 0
         self.best_val_loss = float("inf")
 
+    @beartype
     def compute_loss(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        self, batch: dict[str, Tensor]
+    ) -> tuple[Float[Tensor, ""], dict[str, float]]:
         """
         Compute the total loss including language modeling and Q-learning components.
 
@@ -143,7 +146,8 @@ class HRMTrainer:
 
         return total_loss, metrics
 
-    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
+    @beartype
+    def train_step(self, batch: dict[str, Tensor]) -> dict[str, float]:
         """Perform a single training step."""
         self.model.train()
 
@@ -166,7 +170,8 @@ class HRMTrainer:
         self.step += 1
         return metrics
 
-    def validate(self, val_loader: DataLoader) -> Dict[str, float]:
+    @beartype
+    def validate(self, val_loader: DataLoader) -> dict[str, float]:
         """Validate the model on validation set."""
         self.model.eval()
 
@@ -191,7 +196,8 @@ class HRMTrainer:
 
         return total_metrics
 
-    def train_epoch(self, train_loader: DataLoader) -> Dict[str, float]:
+    @beartype
+    def train_epoch(self, train_loader: DataLoader) -> dict[str, float]:
         """Train for one epoch."""
         self.model.train()
 
@@ -255,11 +261,10 @@ def train_model(
     q_learning_rate: float = 1e-3,
     weight_decay: float = 0.01,
     save_dir: str = "./checkpoints",
-    device: str = None,
+    device: str | None = None,
     print_every: int = 10,
 ):
-    """
-    Train the HRM model with the specified parameters.
+    """Train the HRM model with the specified parameters.
 
     Args:
         num_epochs: Number of training epochs
@@ -377,40 +382,49 @@ def main():
     """Main function with command line argument parsing."""
     parser = argparse.ArgumentParser(description="Train HRM model")
     parser.add_argument(
-        "--epochs", type=int, default=5, help="Number of training epochs"
+        "--epochs", type=int, default=5, help="Number of training epochs (default: 5)"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=16, help="Batch size for training"
+        "--batch_size",
+        type=int,
+        default=16,
+        help="Batch size for training (default: 16)",
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
         default=1e-4,
-        help="Learning rate for language modeling",
+        help="Learning rate for language modeling (default: 1e-4)",
     )
     parser.add_argument(
         "--q_learning_rate",
         type=float,
         default=1e-3,
-        help="Learning rate for Q-learning",
+        help="Learning rate for Q-learning (default: 1e-3)",
     )
     parser.add_argument(
         "--weight_decay",
         type=float,
         default=0.01,
-        help="Weight decay for regularization",
+        help="Weight decay for regularization (default: 0.01)",
     )
     parser.add_argument(
         "--save_dir",
         type=str,
         default="./hrm_checkpoints",
-        help="Directory to save checkpoints",
+        help="Directory to save checkpoints (default: ./hrm_checkpoints)",
     )
     parser.add_argument(
-        "--device", type=str, default=None, help="Device to use (cuda/cpu)"
+        "--device",
+        type=str,
+        default=None,
+        help="Device to use (cuda/cpu) (default: auto-detect)",
     )
     parser.add_argument(
-        "--print_every", type=int, default=10, help="Print progress every n steps"
+        "--print_every",
+        type=int,
+        default=10,
+        help="Print progress every n steps (default: 10)",
     )
 
     args = parser.parse_args()
