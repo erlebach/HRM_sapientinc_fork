@@ -46,12 +46,11 @@ model = create_asymmetric_hrm_model(
     intermediate_size=2048,
     max_seq_len=128,
     num_puzzle_ids=100,
-    s1_layers=2,      # Fewer layers for speed
-    s1_cycles=4,      # More cycles for throughput
-    s2_layers=4,      # More layers for sophistication
-    s2_cycles=2,      # Fewer cycles but complex
-    s2_memory_size=64,
-    halt_max_steps=16,
+    L_blocks=2,        # Fewer blocks for speed
+    H_blocks=4,        # More blocks for sophistication
+    H_memory_size=64,
+    T_cycles=2,        # Number of cycles per segment
+    M_segments=16,     # Maximum number of segments
 )
 
 # Forward pass
@@ -63,9 +62,9 @@ outputs = model(input_ids, puzzle_ids)
 logits = outputs['logits']                    # [batch, seq, vocab]
 q_halt = outputs['q_halt_logits']             # [batch]
 q_continue = outputs['q_continue_logits']     # [batch]
-final_s1_state = outputs['final_s1_state']   # [batch, seq, hidden]
-final_s2_state = outputs['final_s2_state']   # [batch, seq, hidden]
-steps_taken = outputs['steps_taken']         # scalar
+final_L_state = outputs['final_L_state']     # [batch, seq, hidden]
+final_H_state = outputs['final_H_state']     # [batch, seq, hidden]
+segments_taken = outputs['segments_taken']   # scalar
 ```
 
 ### Advanced Usage
@@ -79,12 +78,11 @@ model = create_asymmetric_hrm_model(
     intermediate_size=3072,
     max_seq_len=256,
     num_puzzle_ids=200,
-    s1_layers=3,           # System 1: 3 layers
-    s1_cycles=6,           # System 1: 6 cycles
-    s2_layers=8,           # System 2: 8 layers
-    s2_cycles=3,           # System 2: 3 cycles
-    s2_memory_size=128,    # Larger working memory
-    halt_max_steps=32,     # More computation steps
+    L_blocks=3,             # Low-level: 3 blocks
+    H_blocks=8,             # High-level: 8 blocks
+    H_memory_size=128,      # Larger working memory
+    T_cycles=2,             # Number of cycles per segment
+    M_segments=32,          # More computation segments
 )
 
 # Reset reasoning history
@@ -93,8 +91,8 @@ model.reset_reasoning_history()
 # Get model information
 info = model.get_model_info()
 print(f"Total parameters: {info['total_parameters']:,}")
-print(f"System 1 parameters: {info['system1_parameters']:,}")
-print(f"System 2 parameters: {info['system2_parameters']:,}")
+print(f"L_module parameters: {info['L_parameters']:,}")
+print(f"H_module parameters: {info['H_parameters']:,}")
 ```
 
 ## Architecture Details

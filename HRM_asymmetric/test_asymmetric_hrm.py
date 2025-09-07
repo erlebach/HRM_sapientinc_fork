@@ -109,18 +109,17 @@ def test_asymmetric_hrm_structure() -> None:
         intermediate_size=256,
         max_seq_len=32,
         num_puzzle_ids=10,
-        s1_layers=2,
-        s1_cycles=2,
-        s2_layers=3,
-        s2_cycles=1,
-        s2_memory_size=16,
-        halt_max_steps=4,
+        L_blocks=2,
+        H_blocks=3,
+        H_memory_size=16,
+        T_cycles=2,
+        M_segments=4,
     )
 
     # Test basic properties
     assert isinstance(model, nn.Module)
-    assert hasattr(model, "system1")
-    assert hasattr(model, "system2")
+    assert hasattr(model, "L_module")
+    assert hasattr(model, "H_module")
     assert hasattr(model, "token_embedding")
     assert hasattr(model, "puzzle_embedding")
     assert hasattr(model, "lm_head")
@@ -137,17 +136,17 @@ def test_asymmetric_hrm_structure() -> None:
     assert "logits" in outputs
     assert "q_halt_logits" in outputs
     assert "q_continue_logits" in outputs
-    assert "final_s1_state" in outputs
-    assert "final_s2_state" in outputs
-    assert "steps_taken" in outputs
+    assert "final_L_state" in outputs
+    assert "final_H_state" in outputs
+    assert "segments_taken" in outputs
 
     # Test output shapes
     assert outputs["logits"].shape == (batch_size, seq_len, 100)
     assert outputs["q_halt_logits"].shape == (batch_size,)
     assert outputs["q_continue_logits"].shape == (batch_size,)
-    assert outputs["final_s1_state"].shape == (batch_size, seq_len, 128)
-    assert outputs["final_s2_state"].shape == (batch_size, seq_len, 128)
-    assert outputs["steps_taken"].shape == ()
+    assert outputs["final_L_state"].shape == (batch_size, seq_len, 128)
+    assert outputs["final_H_state"].shape == (batch_size, seq_len, 128)
+    assert outputs["segments_taken"].shape == ()
 
     # Test no NaN or Inf values
     for key, value in outputs.items():
@@ -170,12 +169,11 @@ def test_parameter_efficiency() -> None:
         intermediate_size=2048,
         max_seq_len=128,
         num_puzzle_ids=100,
-        s1_layers=2,
-        s1_cycles=4,
-        s2_layers=4,
-        s2_cycles=2,
-        s2_memory_size=64,
-        halt_max_steps=16,
+        L_blocks=2,
+        H_blocks=4,
+        H_memory_size=64,
+        T_cycles=2,
+        M_segments=16,
     )
 
     # Create equivalent standard transformer
@@ -185,7 +183,7 @@ def test_parameter_efficiency() -> None:
         TransformerEncoderLayer(
             d_model=512, nhead=8, dim_feedforward=2048, batch_first=True
         ),
-        num_layers=6,  # s1_layers + s2_layers
+        num_layers=6,  # L_blocks + H_blocks
     )
 
     # Count parameters
@@ -213,12 +211,11 @@ def test_adaptive_computation() -> None:
         intermediate_size=128,
         max_seq_len=16,
         num_puzzle_ids=5,
-        s1_layers=1,
-        s1_cycles=1,
-        s2_layers=2,
-        s2_cycles=1,
-        s2_memory_size=8,
-        halt_max_steps=4,
+        L_blocks=1,
+        H_blocks=2,
+        H_memory_size=8,
+        T_cycles=1,
+        M_segments=4,
     )
 
     batch_size, seq_len = 2, 8
@@ -228,12 +225,12 @@ def test_adaptive_computation() -> None:
     # Test training mode (uses Q-values)
     model.train()
     train_outputs = model(input_ids, puzzle_ids)
-    assert 1 <= train_outputs["steps_taken"] <= 4
+    assert 1 <= train_outputs["segments_taken"] <= 4
 
-    # Test eval mode (uses max steps)
+    # Test eval mode (uses max segments)
     model.eval()
     eval_outputs = model(input_ids, puzzle_ids)
-    assert eval_outputs["steps_taken"] == 4
+    assert eval_outputs["segments_taken"] == 4
 
     print("✓ Adaptive computation test passed")
 
@@ -249,12 +246,11 @@ def test_reasoning_history() -> None:
         intermediate_size=128,
         max_seq_len=16,
         num_puzzle_ids=3,
-        s1_layers=1,
-        s1_cycles=1,
-        s2_layers=2,
-        s2_cycles=1,
-        s2_memory_size=8,
-        halt_max_steps=2,
+        L_blocks=1,
+        H_blocks=2,
+        H_memory_size=8,
+        T_cycles=1,
+        M_segments=2,
     )
 
     batch_size, seq_len = 1, 8
@@ -262,19 +258,19 @@ def test_reasoning_history() -> None:
     puzzle_ids = torch.randint(0, 3, (batch_size,))
 
     # Initially no history
-    assert model.system2.reasoning_history is None
+    assert model.H_module.reasoning_history is None
 
     # Process in training mode to build history
     model.train()
     outputs = model(input_ids, puzzle_ids)
 
     # Should have reasoning history now
-    assert model.system2.reasoning_history is not None
-    assert model.system2.reasoning_history.shape[0] == batch_size
+    assert model.H_module.reasoning_history is not None
+    assert model.H_module.reasoning_history.shape[0] == batch_size
 
     # Reset history
     model.reset_reasoning_history()
-    assert model.system2.reasoning_history is None
+    assert model.H_module.reasoning_history is None
 
     print("✓ Reasoning history test passed")
 
@@ -290,12 +286,11 @@ def test_model_info() -> None:
         intermediate_size=192,
         max_seq_len=24,
         num_puzzle_ids=8,
-        s1_layers=2,
-        s1_cycles=3,
-        s2_layers=4,
-        s2_cycles=2,
-        s2_memory_size=12,
-        halt_max_steps=6,
+        L_blocks=2,
+        H_blocks=4,
+        H_memory_size=12,
+        T_cycles=2,
+        M_segments=6,
     )
 
     info = model.get_model_info()
@@ -303,13 +298,13 @@ def test_model_info() -> None:
     # Test required keys
     required_keys = [
         "total_parameters",
-        "system1_parameters",
-        "system2_parameters",
-        "system1_layers",
-        "system2_layers",
-        "system1_cycles",
-        "system2_cycles",
-        "system2_memory_size",
+        "L_parameters",
+        "H_parameters",
+        "L_blocks",
+        "H_blocks",
+        "T_cycles",
+        "M_segments",
+        "H_memory_size",
         "hidden_size",
     ]
 
@@ -317,24 +312,21 @@ def test_model_info() -> None:
         assert key in info, f"Missing key: {key}"
 
     # Test values make sense
-    assert info["system1_layers"] == 1  # num_layers // 2
-    assert info["system2_layers"] == 4  # max(2, num_layers)
-    assert info["system1_cycles"] == 3
-    assert info["system2_cycles"] == 2
-    assert info["system2_memory_size"] == 12
+    assert info["L_blocks"] == 1  # num_layers // 2
+    assert info["H_blocks"] == 4  # max(2, num_layers)
+    assert info["T_cycles"] == 2
+    assert info["M_segments"] == 6
+    assert info["H_memory_size"] == 12
     assert info["hidden_size"] == 96
 
     # Test parameter counts
     assert info["total_parameters"] > 0
-    assert info["system1_parameters"] > 0
-    assert info["system2_parameters"] > 0
+    assert info["L_parameters"] > 0
+    assert info["H_parameters"] > 0
 
     # Test that total is at least the sum of system parameters
     # (there are also embedding and output head parameters)
-    assert (
-        info["total_parameters"]
-        >= info["system1_parameters"] + info["system2_parameters"]
-    )
+    assert info["total_parameters"] >= info["L_parameters"] + info["H_parameters"]
 
     print("✓ Model info test passed")
 
@@ -350,12 +342,11 @@ def test_gradient_flow() -> None:
         intermediate_size=128,
         max_seq_len=16,
         num_puzzle_ids=5,
-        s1_layers=1,
-        s1_cycles=1,
-        s2_layers=2,
-        s2_cycles=1,
-        s2_memory_size=8,
-        halt_max_steps=2,
+        L_blocks=1,
+        H_blocks=2,
+        H_memory_size=8,
+        T_cycles=1,
+        M_segments=2,
     )
 
     batch_size, seq_len = 2, 8

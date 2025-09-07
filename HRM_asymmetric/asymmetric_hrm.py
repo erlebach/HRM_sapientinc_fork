@@ -1,21 +1,25 @@
 """
 Asymmetric HRM Model - System 1/System 2 Architecture
 
-This module combines System 1 (fast, intuitive) and System 2 (deliberate, analytical)
-reasoning modules in a hierarchical architecture inspired by Kahneman's dual-process theory.
+This module implements a Kahneman-inspired hierarchical reasoning model that combines fast, intuitive processing (System 1) with deliberate, analytical processing (System 2).
 
 Key differences from the original HRM:
-- System 1: Fast, LLM-like processing with minimal memory
-- System 2: Sophisticated reasoning with working memory and attention to history
-- Asymmetric processing cycles and complexity
+- System 1 (L): Fast, LLM-like processing with minimal memory
+- System 2 (H): Sophisticated reasoning with working memory and attention to history
+- Asymmetric processing blocks and complexity
 - Specialized architectures for different reasoning types
+
+Standard HRM Notation:
+- M: Number of segments (reasoning steps)
+- T: Number of cycles per segment (same for L and H)
+- L_blocks: Number of transformer blocks in Low-level module
+- H_blocks: Number of transformer blocks in High-level module
 """
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from beartype import beartype
 from jaxtyping import Float, Int
@@ -25,7 +29,7 @@ from system1_module import System1Module
 
 # from .system2_module import System2Module
 from system2_module import System2Module
-from torch import Tensor
+from torch import Tensor, nn
 
 
 @beartype
@@ -33,12 +37,17 @@ class AsymmetricHRMModel(nn.Module):
     """Asymmetric Hierarchical Reasoning Model with System 1/System 2 architecture.
 
     This model implements Kahneman's dual-process theory:
-    - System 1 (Low-level): Fast, intuitive processing like an LLM
-    - System 2 (High-level): Deliberate, analytical processing with memory
+    - System 1 (L): Fast, intuitive processing like an LLM
+    - System 2 (H): Deliberate, analytical processing with memory
 
     The architecture allows for different processing strategies at each level,
     with System 1 handling rapid pattern recognition and System 2 performing
     complex reasoning with working memory.
+
+    Standard HRM Algorithm:
+    - M segments (reasoning steps)
+    - T cycles per segment (same for L and H)
+    - L_blocks/H_blocks transformer blocks per module
     """
 
     def __init__(
@@ -49,53 +58,51 @@ class AsymmetricHRMModel(nn.Module):
         intermediate_size: int,
         max_seq_len: int,
         num_puzzle_ids: int,
-        # System 1 parameters (fast processing)
-        s1_layers: int,
-        s1_cycles: int,
-        # System 2 parameters (deliberate processing)
-        s2_layers: int,
-        s2_cycles: int,
-        s2_memory_size: int = 64,
-        # Overall model parameters
-        halt_max_steps: int = 5,
+        # Low-level (L) parameters - System 1
+        L_blocks: int,
+        # High-level (H) parameters - System 2
+        H_blocks: int,
+        H_memory_size: int = 64,
+        # HRM algorithm parameters
+        T_cycles: int = 2,  # Number of cycles per segment (same for L and H)
+        M_segments: int = 16,  # Maximum number of segments
     ):
         super().__init__()
 
         self.hidden_size = hidden_size
-        self.s1_cycles = s1_cycles
-        self.s2_cycles = s2_cycles
-        self.halt_max_steps = halt_max_steps
+        self.T_cycles = T_cycles
+        self.M_segments = M_segments
 
         # Embeddings
         self.token_embedding = nn.Embedding(vocab_size, hidden_size)
         self.puzzle_embedding = nn.Embedding(num_puzzle_ids, hidden_size)
         self.embed_scale = math.sqrt(hidden_size)
 
-        # Asymmetric reasoning modules
-        self.system1 = System1Module(
+        # HRM reasoning modules
+        self.L_module = System1Module(
             hidden_size=hidden_size,
             num_heads=num_heads,
             intermediate_size=intermediate_size,
-            num_layers=s1_layers,
+            num_layers=L_blocks,
             max_seq_len=max_seq_len,
         )
 
-        self.system2 = System2Module(
+        self.H_module = System2Module(
             hidden_size=hidden_size,
             num_heads=num_heads,
             intermediate_size=intermediate_size,
-            num_layers=s2_layers,
+            num_layers=H_blocks,
             max_seq_len=max_seq_len,
-            memory_size=s2_memory_size,
+            memory_size=H_memory_size,
         )
 
         # Output heads
         self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
         self.q_head = nn.Linear(hidden_size, 2, bias=True)  # halt vs continue
 
-        # Initial states for System 1 and System 2
-        self.s1_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
-        self.s2_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
+        # Initial states for L and H modules
+        self.L_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
+        self.H_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
 
         # Initialize Q-head to prefer continuing initially
         with torch.no_grad():
@@ -123,136 +130,136 @@ class AsymmetricHRMModel(nn.Module):
         embeddings = token_emb + puzzle_emb
         return self.embed_scale * embeddings
 
-    def forward_single_step(
+    def forward_single_segment(
         self,
-        s1_state: Float[Tensor, "batch seq hidden"],
-        s2_state: Float[Tensor, "batch seq hidden"],
+        L_state: Float[Tensor, "batch seq hidden"],
+        H_state: Float[Tensor, "batch seq hidden"],
         input_embeddings: Float[Tensor, "batch seq hidden"],
     ) -> tuple[
         Float[Tensor, "batch seq hidden"],
         Float[Tensor, "batch seq hidden"],
         Float[Tensor, "batch 2"],
     ]:
-        """Execute a single forward step through the asymmetric reasoning process.
+        """Execute a single HRM segment with T cycles.
 
         Args:
-            s1_state: System 1 state [batch, seq, hidden]
-            s2_state: System 2 state [batch, seq, hidden]
+            L_state: Low-level state [batch, seq, hidden]
+            H_state: High-level state [batch, seq, hidden]
             input_embeddings: Input embeddings [batch, seq, hidden]
 
         Returns:
-            new_s1_state: Updated System 1 state
-            new_s2_state: Updated System 2 state
+            new_L_state: Updated Low-level state
+            new_H_state: Updated High-level state
             q_logits: Q-values for halt/continue decision [batch, 2]
         """
-        # System 1 processing cycles (fast, intuitive)
-        for _ in range(self.s1_cycles):
-            # System 1 receives input + System 2 state for context
-            s1_input = s2_state + input_embeddings
-            s1_state = self.system1(s1_state, s1_input)
+        # T cycles per segment (standard HRM algorithm)
+        for _ in range(self.T_cycles):
+            # L processing (L_blocks iterations within each T cycle)
+            # L receives input + H state for context
+            L_input = H_state + input_embeddings
+            L_state = self.L_module(L_state, L_input)
 
-        # System 2 processing cycles (deliberate, analytical)
-        for _ in range(self.s2_cycles):
-            # System 2 receives System 1 state + input for context
-            s2_input = s1_state + input_embeddings
-            s2_state = self.system2(s2_state, s2_input)
+            # H processing (H_blocks iterations within each T cycle)
+            # H receives L state for context
+            H_input = L_state + input_embeddings
+            H_state = self.H_module(H_state, H_input)
 
-        # Q-values for halting decision (using first token of System 2 state)
-        q_logits = self.q_head(s2_state[:, 0])  # [batch, 2]
+        # Q-values for halting decision (using first token of H state)
+        q_logits = self.q_head(H_state[:, 0])  # [batch, 2]
 
-        return s1_state, s2_state, q_logits
+        return L_state, H_state, q_logits
 
     def forward(
         self,
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
-        s1_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
-        s2_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
-        max_steps: Optional[int] = None,
-    ) -> Dict[str, Tensor]:
+        L_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
+        H_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
+        max_segments: Optional[int] = None,
+    ) -> dict[str, Tensor]:
         """Execute forward pass through the Asymmetric HRM model.
 
         Args:
             input_ids: Input token IDs [batch, seq]
             puzzle_ids: Puzzle identifiers [batch]
-            s1_state: Initial System 1 state (optional)
-            s2_state: Initial System 2 state (optional)
-            max_steps: Maximum computation steps (optional)
+            L_state: Initial Low-level state (optional)
+            H_state: Initial High-level state (optional)
+            max_segments: Maximum number of segments (optional)
 
         Returns:
             Dictionary containing:
             - logits: Language model predictions [batch, seq, vocab]
             - q_halt_logits: Q-values for halting [batch]
             - q_continue_logits: Q-values for continuing [batch]
-            - final_s1_state: Final System 1 state
-            - final_s2_state: Final System 2 state
-            - steps_taken: Number of computation steps taken
+            - final_L_state: Final Low-level state
+            - final_H_state: Final High-level state
+            - segments_taken: Number of segments taken
         """
         batch_size, seq_len = input_ids.shape
-        max_steps = max_steps or self.halt_max_steps
+        max_segments = max_segments or self.M_segments
 
         # Initialize states if not provided
-        if s1_state is None:
-            s1_state: Float[Tensor, "batch seq hidden"] = (
-                self.s1_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
+        if L_state is None:
+            L_state: Float[Tensor, "batch seq hidden"] = (
+                self.L_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
-        if s2_state is None:
-            s2_state: Float[Tensor, "batch seq hidden"] = (
-                self.s2_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
+        if H_state is None:
+            H_state: Float[Tensor, "batch seq hidden"] = (
+                self.H_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
 
         # Get input embeddings
         input_embeddings = self.get_embeddings(input_ids, puzzle_ids)
 
-        # Adaptive computation time loop
-        steps_taken = 0
-        for _ in range(max_steps):
-            # Forward step through asymmetric reasoning
-            s1_state, s2_state, q_logits = self.forward_single_step(
-                s1_state, s2_state, input_embeddings
+        # M segments (adaptive computation)
+        segments_taken = 0
+        for _ in range(max_segments):
+            # Forward segment through HRM algorithm
+            L_state, H_state, q_logits = self.forward_single_segment(
+                L_state, H_state, input_embeddings
             )
-            steps_taken += 1
+            segments_taken += 1
 
-            # Check if we should halt (during training, use Q-values; during eval, use max steps)
+            # Check if we should halt (during training, use Q-values; during eval, use max segments)
             if self.training:
                 # In training mode, check Q-values for early stopping
                 halt_logits, continue_logits = q_logits[:, 0], q_logits[:, 1]
                 should_halt = halt_logits > continue_logits
                 if should_halt.all():
                     break
-            # In eval mode, continue for max_steps (don't break early)
+            # In eval mode, continue for max_segments (don't break early)
 
-        # Generate final predictions using System 2 state (more sophisticated)
-        logits = self.lm_head(s2_state)
+        # Generate final predictions using H state (more sophisticated)
+        logits = self.lm_head(H_state)
 
         return {
             "logits": logits,
             "q_halt_logits": q_logits[:, 0],
             "q_continue_logits": q_logits[:, 1],
-            "final_s1_state": s1_state,
-            "final_s2_state": s2_state,
-            "steps_taken": torch.tensor(steps_taken),
+            "final_L_state": L_state,
+            "final_H_state": H_state,
+            "segments_taken": torch.tensor(segments_taken),
         }
 
     def reset_reasoning_history(self) -> None:
-        """Reset the reasoning history in System 2."""
-        self.system2.reset_reasoning_history()
+        """Reset the reasoning history in H module."""
+        self.H_module.reset_reasoning_history()
 
-    def get_model_info(self) -> Dict[str, Any]:
+    def get_model_info(self) -> dict[str, Any]:
         """Get information about the model architecture."""
-        s1_params = sum(p.numel() for p in self.system1.parameters())
-        s2_params = sum(p.numel() for p in self.system2.parameters())
+        L_params = sum(p.numel() for p in self.L_module.parameters())
+        H_params = sum(p.numel() for p in self.H_module.parameters())
         total_params = sum(p.numel() for p in self.parameters())
 
         return {
             "total_parameters": total_params,
-            "system1_parameters": s1_params,
-            "system2_parameters": s2_params,
-            "system1_layers": len(self.system1.layers),
-            "system2_layers": len(self.system2.layers),
-            "system1_cycles": self.s1_cycles,
-            "system2_cycles": self.s2_cycles,
-            "system2_memory_size": self.system2.memory_size,
+            "L_parameters": L_params,
+            "H_parameters": H_params,
+            "L_blocks": len(self.L_module.layers),
+            "H_blocks": len(self.H_module.layers),
+            "T_cycles": self.T_cycles,
+            "M_segments": self.M_segments,
+            "H_memory_size": self.H_module.memory_size,
             "hidden_size": self.hidden_size,
         }
 
@@ -265,15 +272,14 @@ def create_asymmetric_hrm_model(
     intermediate_size: int = 2048,
     max_seq_len: int = 128,
     num_puzzle_ids: int = 100,
-    # System 1 parameters (fast processing)
-    s1_layers: int = 2,  # Fewer layers for speed
-    s1_cycles: int = 4,  # More cycles for fast processing
-    # System 2 parameters (deliberate processing)
-    s2_layers: int = 6,  # More layers for sophistication
-    s2_cycles: int = 2,  # Fewer cycles but more complex
-    s2_memory_size: int = 64,
-    # Overall model parameters
-    halt_max_steps: int = 16,
+    # Low-level (L) parameters - System 1
+    L_blocks: int = 2,  # Fewer blocks for speed
+    # High-level (H) parameters - System 2
+    H_blocks: int = 4,  # More blocks for sophistication
+    H_memory_size: int = 64,
+    # HRM algorithm parameters
+    T_cycles: int = 2,  # Number of cycles per segment (same for L and H)
+    M_segments: int = 16,  # Maximum number of segments
 ) -> AsymmetricHRMModel:
     """Create an Asymmetric HRM model with System 1/System 2 architecture.
 
@@ -284,12 +290,11 @@ def create_asymmetric_hrm_model(
         intermediate_size: MLP intermediate size
         max_seq_len: Maximum sequence length
         num_puzzle_ids: Number of puzzle types
-        s1_layers: Number of layers in System 1 (fewer for speed)
-        s1_cycles: Number of processing cycles in System 1 (more for throughput)
-        s2_layers: Number of layers in System 2 (more for sophistication)
-        s2_cycles: Number of processing cycles in System 2 (fewer but complex)
-        s2_memory_size: Working memory size in System 2
-        halt_max_steps: Maximum computation steps
+        L_blocks: Number of transformer blocks in Low-level module
+        H_blocks: Number of transformer blocks in High-level module
+        H_memory_size: Working memory size in H module
+        T_cycles: Number of cycles per segment (same for L and H)
+        M_segments: Maximum number of segments
 
     Returns:
         Configured AsymmetricHRMModel
@@ -301,12 +306,11 @@ def create_asymmetric_hrm_model(
         intermediate_size=intermediate_size,
         max_seq_len=max_seq_len,
         num_puzzle_ids=num_puzzle_ids,
-        s1_layers=s1_layers,
-        s1_cycles=s1_cycles,
-        s2_layers=s2_layers,
-        s2_cycles=s2_cycles,
-        s2_memory_size=s2_memory_size,
-        halt_max_steps=halt_max_steps,
+        L_blocks=L_blocks,
+        H_blocks=H_blocks,
+        H_memory_size=H_memory_size,
+        T_cycles=T_cycles,
+        M_segments=M_segments,
     )
 
 
@@ -326,7 +330,7 @@ if __name__ == "__main__":
     print(f"Input shape: {input_ids.shape}")
     print(f"Output logits shape: {outputs['logits'].shape}")
     print(f"Q-values shape: {outputs['q_halt_logits'].shape}")
-    print(f"Steps taken: {outputs['steps_taken']}")
+    print(f"Segments taken: {outputs['segments_taken']}")
 
     # Print model information
     model_info = model.get_model_info()

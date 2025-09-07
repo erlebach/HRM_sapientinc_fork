@@ -41,12 +41,11 @@ def demonstrate_system_differences() -> None:
         intermediate_size=256,
         max_seq_len=32,
         num_puzzle_ids=5,
-        s1_layers=1,  # Minimal System 1
-        s1_cycles=2,
-        s2_layers=2,  # More sophisticated System 2
-        s2_cycles=1,
-        s2_memory_size=16,
-        halt_max_steps=4,
+        L_blocks=1,  # Minimal System 1
+        H_blocks=2,  # More sophisticated System 2
+        H_memory_size=16,
+        T_cycles=2,
+        M_segments=4,
     )
 
     # Create sample data
@@ -62,18 +61,18 @@ def demonstrate_system_differences() -> None:
         outputs = model(input_ids, puzzle_ids)
 
     print(f"\nOutput logits shape: {outputs['logits'].shape}")
-    print(f"Steps taken: {outputs['steps_taken']}")
+    print(f"Segments taken: {outputs['segments_taken']}")
 
     # Show model architecture differences
     model_info = model.get_model_info()
     print(f"\nModel Architecture:")
-    print(f"  System 1 layers: {model_info['system1_layers']}")
-    print(f"  System 1 cycles: {model_info['system1_cycles']}")
-    print(f"  System 1 parameters: {model_info['system1_parameters']:,}")
-    print(f"  System 2 layers: {model_info['system2_layers']}")
-    print(f"  System 2 cycles: {model_info['system2_cycles']}")
-    print(f"  System 2 parameters: {model_info['system2_parameters']:,}")
-    print(f"  System 2 memory size: {model_info['system2_memory_size']}")
+    print(f"  L_blocks: {model_info['L_blocks']}")
+    print(f"  H_blocks: {model_info['H_blocks']}")
+    print(f"  L_parameters: {model_info['L_parameters']:,}")
+    print(f"  H_parameters: {model_info['H_parameters']:,}")
+    print(f"  T_cycles: {model_info['T_cycles']}")
+    print(f"  M_segments: {model_info['M_segments']}")
+    print(f"  H_memory_size: {model_info['H_memory_size']}")
 
     # Show Q-values (halting decisions)
     halt_logits = outputs["q_halt_logits"]
@@ -98,12 +97,11 @@ def demonstrate_reasoning_history() -> None:
         intermediate_size=128,
         max_seq_len=16,
         num_puzzle_ids=3,
-        s1_layers=1,
-        s1_cycles=1,
-        s2_layers=2,
-        s2_cycles=1,
-        s2_memory_size=8,
-        halt_max_steps=3,
+        L_blocks=1,
+        H_blocks=2,
+        H_memory_size=8,
+        T_cycles=1,
+        M_segments=3,
     )
 
     # Create sample data
@@ -120,13 +118,13 @@ def demonstrate_reasoning_history() -> None:
         with torch.no_grad():
             outputs = model(input_ids, puzzle_ids)
 
-        print(f"Steps taken: {outputs['steps_taken']}")
+        print(f"Segments taken: {outputs['segments_taken']}")
         print(
-            f"System 2 has reasoning history: {model.system2.reasoning_history is not None}"
+            f"System 2 has reasoning history: {model.H_module.reasoning_history is not None}"
         )
 
-        if model.system2.reasoning_history is not None:
-            print(f"Reasoning history shape: {model.system2.reasoning_history.shape}")
+        if model.H_module.reasoning_history is not None:
+            print(f"Reasoning history shape: {model.H_module.reasoning_history.shape}")
 
         # Reset for next step (in practice, you'd continue with the same states)
         model.reset_reasoning_history()
@@ -146,12 +144,11 @@ def demonstrate_adaptive_computation() -> None:
         intermediate_size=192,
         max_seq_len=24,
         num_puzzle_ids=8,
-        s1_layers=1,
-        s1_cycles=2,
-        s2_layers=3,
-        s2_cycles=1,
-        s2_memory_size=12,
-        halt_max_steps=8,
+        L_blocks=1,
+        H_blocks=3,
+        H_memory_size=12,
+        T_cycles=2,
+        M_segments=8,
     )
 
     # Create sample data
@@ -166,17 +163,17 @@ def demonstrate_adaptive_computation() -> None:
     with torch.no_grad():
         train_outputs = model(input_ids, puzzle_ids)
 
-    print(f"Training mode - Steps taken: {train_outputs['steps_taken']}")
+    print(f"Training mode - Segments taken: {train_outputs['segments_taken']}")
     print(
         f"Q-values (halt, continue): {torch.stack([train_outputs['q_halt_logits'], train_outputs['q_continue_logits']], dim=1)}"
     )
 
-    # Test in eval mode (uses max steps)
+    # Test in eval mode (uses max segments)
     model.eval()
     with torch.no_grad():
         eval_outputs = model(input_ids, puzzle_ids)
 
-    print(f"Eval mode - Steps taken: {eval_outputs['steps_taken']}")
+    print(f"Eval mode - Segments taken: {eval_outputs['segments_taken']}")
 
 
 @beartype
@@ -194,12 +191,11 @@ def demonstrate_parameter_efficiency() -> None:
         intermediate_size=2048,
         max_seq_len=128,
         num_puzzle_ids=100,
-        s1_layers=2,
-        s1_cycles=4,
-        s2_layers=4,
-        s2_cycles=2,
-        s2_memory_size=64,
-        halt_max_steps=16,
+        L_blocks=2,
+        H_blocks=4,
+        H_memory_size=64,
+        T_cycles=2,
+        M_segments=16,
     )
 
     # Create equivalent standard transformer for comparison
@@ -209,7 +205,7 @@ def demonstrate_parameter_efficiency() -> None:
         TransformerEncoderLayer(
             d_model=512, nhead=8, dim_feedforward=2048, batch_first=True
         ),
-        num_layers=6,  # Total layers = s1_layers + s2_layers
+        num_layers=6,  # Total layers = L_blocks + H_blocks
     )
 
     # Count parameters
@@ -221,10 +217,10 @@ def demonstrate_parameter_efficiency() -> None:
     print(f"Parameter ratio: {asymmetric_params / standard_params:.2f}x")
 
     # Show the advantage of hierarchical processing
-    max_computation = 16 * 4 * 2 + 16 * 2 * 4  # steps * cycles * layers
-    print(f"\nMaximum computation (steps × cycles × layers):")
-    print(f"  System 1: {16 * 4 * 2} = {16 * 4 * 2:,} block executions")
-    print(f"  System 2: {16 * 2 * 4} = {16 * 2 * 4:,} block executions")
+    max_computation = 16 * 2 * 2 + 16 * 2 * 4  # segments * T_cycles * blocks
+    print(f"\nMaximum computation (segments × T_cycles × blocks):")
+    print(f"  L_module: {16 * 2 * 2} = {16 * 2 * 2:,} block executions")
+    print(f"  H_module: {16 * 2 * 4} = {16 * 2 * 4:,} block executions")
     print(f"  Total: {max_computation:,} block executions")
     print(f"  Equivalent to {max_computation / 6:.1f}x deeper standard transformer")
 
