@@ -226,3 +226,70 @@ python train.py --epochs 20 --batch_size 32 --learning_rate 1e-4 --T_cycles 3 --
 
 - `train.py` - Complete training script for asymmetric HRM model
 - `JOURNAL.md` - This entry documenting training script creation
+
+---
+
+## 2025-01-XX - Fixed H_to_L Projection Efficiency Bug
+
+### Completed Tasks ✅
+
+1. **Fixed Inefficient H_to_L Projection**
+   - Moved `H_to_L_proj` computation outside T_cycles loop
+   - H_state is constant during L processing cycles
+   - Projection now computed once per segment instead of T_cycles times
+   - Significant computational efficiency improvement
+
+2. **Corrected Architecture Logic**
+   - H_state only changes after H processing, not during L processing
+   - L processing uses the same H_to_L projection throughout T_cycles
+   - Eliminates redundant projection computations
+
+### Key Benefits
+
+- **Computational Efficiency**: H_to_L projection computed once per segment
+- **Correct Architecture**: Aligns with HRM algorithm where H_state is constant during L processing
+- **Performance Improvement**: Reduces unnecessary computations in T_cycles loop
+
+### Files Modified
+
+- `asymmetric_hrm.py` - Fixed H_to_L projection placement
+- `JOURNAL.md` - This entry documenting the architectural fix
+
+### Technical Details
+
+- **Before**: `H_to_L_proj(H_state)` computed inside T_cycles loop
+- **After**: `H_to_L_proj(H_state)` computed once before T_cycles loop
+- **Reasoning**: H_state doesn't change during L processing, only after H processing
+
+---
+
+## 2025-01-XX - Fixed H Processing Architecture Bug
+
+### Completed Tasks ✅
+
+1. **Fixed H Processing Frequency**
+   - Moved `H_module` call outside T_cycles loop
+   - H now processes once per segment (not T_cycles times)
+   - Aligns with standard HRM algorithm architecture
+
+2. **Corrected L_to_H Projection Timing**
+   - `L_to_H_proj` now computed after all T_cycles complete
+   - Uses final L_state from all T_cycles iterations
+   - H receives the fully processed L_state
+
+### Key Benefits
+
+- **Correct HRM Algorithm**: H processes once per segment, not every T cycle
+- **Computational Efficiency**: H_module called once per segment instead of T_cycles times
+- **Proper Architecture**: L processes T_cycles times, then H processes once
+
+### Files Modified
+
+- `asymmetric_hrm.py` - Fixed H processing architecture
+- `JOURNAL.md` - This entry documenting the architectural fix
+
+### Technical Details
+
+- **Before**: `H_module` called inside T_cycles loop (T_cycles times per segment)
+- **After**: `H_module` called once after T_cycles loop (once per segment)
+- **Reasoning**: Standard HRM algorithm processes L for T_cycles, then H once

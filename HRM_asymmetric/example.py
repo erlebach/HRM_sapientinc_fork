@@ -23,6 +23,9 @@ def create_sample_puzzle_data(
     """Create sample puzzle data for testing."""
     input_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
     puzzle_ids = torch.randint(0, num_puzzle_ids, (batch_size,))
+    print(f"\n==> Create sample puzzle data...")
+    print(f"input_ids shape: {input_ids.shape}")
+    print(f"puzzle_ids shape: {puzzle_ids.shape}")
     return input_ids, puzzle_ids
 
 
@@ -54,8 +57,9 @@ def demonstrate_system_differences() -> None:
         batch_size=2, seq_len=10, vocab_size=100, num_puzzle_ids=5
     )
 
-    print(f"Input shape: {input_ids.shape}")
-    print(f"Puzzle IDs: {puzzle_ids}")
+    print("\n==> Return from create_sample_puzzle_data ...")
+    print(f"{input_ids.shape=}")
+    print(f"{puzzle_ids.shape=}")
 
     # Forward pass
     with torch.no_grad():
@@ -237,9 +241,9 @@ def main() -> None:
 
     # Run demonstrations
     demonstrate_system_differences()
-    demonstrate_reasoning_history()
-    demonstrate_adaptive_computation()
-    demonstrate_parameter_efficiency()
+    # demonstrate_reasoning_history()
+    # demonstrate_adaptive_computation()
+    # demonstrate_parameter_efficiency()
 
     print("\n" + "=" * 60)
     print("DEMONSTRATION COMPLETE")

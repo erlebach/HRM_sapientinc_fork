@@ -131,8 +131,18 @@ class AsymmetricHRMModel(nn.Module):
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
     ) -> Float[Tensor, "batch seq L_hidden"]:
-        """Get input embeddings with puzzle-specific conditioning."""
-        # Token embeddings
+        """Get input embeddings with puzzle-specific conditioning.
+
+        Args:
+            input_ids: Tensor of token indices with shape [batch, seq].
+            puzzle_ids: Tensor of puzzle indices with shape [batch].
+
+        Returns:
+            Embeddings tensor of shape [batch, seq, L_hidden], combining token and
+            puzzle-specific embeddings, scaled by the embedding scale factor.
+
+        """
+        # Token embeddings (shape: [batch, seq, L_hidden])
         token_emb = self.token_embedding(input_ids)
 
         # Puzzle embeddings (broadcast to sequence length)
@@ -144,6 +154,7 @@ class AsymmetricHRMModel(nn.Module):
         )  # [batch, seq, L_hidden]
 
         # Combine embeddings
+        # They have both been rescaled to (batch, seq, L_hidden)
         embeddings = token_emb + puzzle_emb
         return self.embed_scale * embeddings
 
@@ -169,26 +180,28 @@ class AsymmetricHRMModel(nn.Module):
             new_H_state: Updated High-level state
             q_logits: Q-values for halt/continue decision [batch, 2]
         """
+        # Project H state to L dimensions once per segment (H_state is constant during L processing)
+        if self.H_to_L_proj is not None:
+            H_to_L = self.H_to_L_proj(H_state)  # [batch, seq, L_hidden]
+        else:
+            H_to_L = H_state  # Same dimensions, no projection needed
+
         # T cycles per segment (standard HRM algorithm)
         for _ in range(self.T_cycles):
             # L processing (L_blocks iterations within each T cycle)
-            # L receives input + H state for context (with projection if needed)
-            if self.H_to_L_proj is not None:
-                H_to_L = self.H_to_L_proj(H_state)  # [batch, seq, L_hidden]
-            else:
-                H_to_L = H_state  # Same dimensions, no projection needed
+            # L receives input + H state for context
             L_input = H_to_L + input_embeddings
             L_state = self.L_module(L_state, L_input)
 
-            # H processing (H_blocks iterations within each T cycle)
-            # H receives L state for context (with projection if needed)
-            if self.L_to_H_proj is not None:
-                L_to_H = self.L_to_H_proj(L_state)  # [batch, seq, H_hidden]
-                H_input = L_to_H + self.L_to_H_proj(input_embeddings)
-            else:
-                L_to_H = L_state  # Same dimensions, no projection needed
-                H_input = L_to_H + input_embeddings
-            H_state = self.H_module(H_state, H_input)
+        # H processing (once per segment after all T cycles)
+        # H receives L state for context (with projection if needed)
+        if self.L_to_H_proj is not None:
+            L_to_H = self.L_to_H_proj(L_state)  # [batch, seq, H_hidden]
+            H_input = L_to_H + self.L_to_H_proj(input_embeddings)
+        else:
+            L_to_H = L_state  # Same dimensions, no projection needed
+            H_input = L_to_H + input_embeddings
+        H_state = self.H_module(H_state, H_input)
 
         # Q-values for halting decision (using first token of H state)
         q_logits = self.q_head(H_state[:, 0])  # [batch, 2]
@@ -199,8 +212,8 @@ class AsymmetricHRMModel(nn.Module):
         self,
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
-        L_state: Optional[Float[Tensor, "batch seq L_hidden"]] = None,
-        H_state: Optional[Float[Tensor, "batch seq H_hidden"]] = None,
+        L_state: Float[Tensor, "batch seq L_hidden"] | None = None,
+        H_state: Float[Tensor, "batch seq H_hidden"] | None = None,
         max_segments: Optional[int] = None,
     ) -> dict[str, Tensor]:
         """Execute forward pass through the Asymmetric HRM model.

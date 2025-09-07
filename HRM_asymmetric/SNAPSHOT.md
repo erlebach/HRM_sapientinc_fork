@@ -1,4 +1,4 @@
-# HRM Asymmetric Project Snapshot - 2025-09-07_16:09
+# HRM Asymmetric Project Snapshot - 2025-01-XX
 
 ## Current Architecture
 
@@ -81,6 +81,8 @@ HRM_asymmetric/
 - ✅ Updated architecture for fine-to-coarse processing
 - ✅ Optimized projection layers (conditional creation)
 - ✅ Added symmetric model convenience function
+- ✅ **FIXED: H_to_L projection efficiency bug** - moved projection outside T_cycles loop
+- ✅ **FIXED: H processing architecture bug** - H now processes once per segment (not T_cycles times)
 
 ### Current Status
 - **Development**: Complete and ready for production use
