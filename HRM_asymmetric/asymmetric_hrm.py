@@ -1,5 +1,4 @@
-"""
-Asymmetric HRM Model - System 1/System 2 Architecture
+"""Asymmetric HRM Model - System 1/System 2 Architecture.
 
 This module implements a Kahneman-inspired hierarchical reasoning model that combines fast, intuitive processing (System 1) with deliberate, analytical processing (System 2).
 
@@ -106,9 +105,13 @@ class AsymmetricHRMModel(nn.Module):
             memory_size=H_memory_size,
         )
 
-        # Projection layers for dimension matching
-        self.L_to_H_proj = nn.Linear(L_hidden_size, H_hidden_size, bias=False)
-        self.H_to_L_proj = nn.Linear(H_hidden_size, L_hidden_size, bias=False)
+        # Projection layers for dimension matching (only if dimensions differ)
+        if L_hidden_size != H_hidden_size:
+            self.L_to_H_proj = nn.Linear(L_hidden_size, H_hidden_size, bias=False)
+            self.H_to_L_proj = nn.Linear(H_hidden_size, L_hidden_size, bias=False)
+        else:
+            self.L_to_H_proj = None
+            self.H_to_L_proj = None
 
         # Output heads - use H_hidden_size for final predictions (abstract reasoning)
         self.lm_head = nn.Linear(H_hidden_size, vocab_size, bias=False)
@@ -169,15 +172,22 @@ class AsymmetricHRMModel(nn.Module):
         # T cycles per segment (standard HRM algorithm)
         for _ in range(self.T_cycles):
             # L processing (L_blocks iterations within each T cycle)
-            # L receives input + projected H state for context
-            H_to_L = self.H_to_L_proj(H_state)  # [batch, seq, L_hidden]
+            # L receives input + H state for context (with projection if needed)
+            if self.H_to_L_proj is not None:
+                H_to_L = self.H_to_L_proj(H_state)  # [batch, seq, L_hidden]
+            else:
+                H_to_L = H_state  # Same dimensions, no projection needed
             L_input = H_to_L + input_embeddings
             L_state = self.L_module(L_state, L_input)
 
             # H processing (H_blocks iterations within each T cycle)
-            # H receives projected L state for context
-            L_to_H = self.L_to_H_proj(L_state)  # [batch, seq, H_hidden]
-            H_input = L_to_H + self.L_to_H_proj(input_embeddings)
+            # H receives L state for context (with projection if needed)
+            if self.L_to_H_proj is not None:
+                L_to_H = self.L_to_H_proj(L_state)  # [batch, seq, H_hidden]
+                H_input = L_to_H + self.L_to_H_proj(input_embeddings)
+            else:
+                L_to_H = L_state  # Same dimensions, no projection needed
+                H_input = L_to_H + input_embeddings
             H_state = self.H_module(H_state, H_input)
 
         # Q-values for halting decision (using first token of H state)
@@ -278,6 +288,7 @@ class AsymmetricHRMModel(nn.Module):
             "H_memory_size": self.H_module.memory_size,
             "L_hidden_size": self.L_hidden_size,
             "H_hidden_size": self.H_hidden_size,
+            "uses_projection_layers": self.L_to_H_proj is not None,
         }
 
 
@@ -334,8 +345,63 @@ def create_asymmetric_hrm_model(
     )
 
 
+@beartype
+def create_symmetric_hrm_model(
+    vocab_size: int = 1000,
+    hidden_size: int = 512,  # Same dimension for both systems
+    num_heads: int = 8,
+    intermediate_size: int = 2048,
+    max_seq_len: int = 128,
+    num_puzzle_ids: int = 100,
+    # Low-level (L) parameters - System 1
+    L_blocks: int = 2,  # Fewer blocks for speed
+    # High-level (H) parameters - System 2
+    H_blocks: int = 4,  # More blocks for sophistication
+    H_memory_size: int = 64,
+    # HRM algorithm parameters
+    T_cycles: int = 2,  # Number of cycles per segment (same for L and H)
+    M_segments: int = 16,  # Maximum number of segments
+) -> AsymmetricHRMModel:
+    """Create an Asymmetric HRM model with equal hidden dimensions (no projection layers).
+
+    This is a convenience function for when you want both systems to use the same
+    hidden dimension, eliminating the need for projection layers and reducing parameters.
+
+    Args:
+        vocab_size: Vocabulary size
+        hidden_size: Hidden dimension for both System 1 and System 2
+        num_heads: Number of attention heads
+        intermediate_size: MLP intermediate size
+        max_seq_len: Maximum sequence length
+        num_puzzle_ids: Number of puzzle types
+        L_blocks: Number of transformer blocks in Low-level module
+        H_blocks: Number of transformer blocks in High-level module
+        H_memory_size: Working memory size in H module
+        T_cycles: Number of cycles per segment (same for L and H)
+        M_segments: Maximum number of segments
+
+    Returns:
+        Configured AsymmetricHRMModel with equal hidden dimensions
+    """
+    return AsymmetricHRMModel(
+        vocab_size=vocab_size,
+        L_hidden_size=hidden_size,
+        H_hidden_size=hidden_size,
+        num_heads=num_heads,
+        intermediate_size=intermediate_size,
+        max_seq_len=max_seq_len,
+        num_puzzle_ids=num_puzzle_ids,
+        L_blocks=L_blocks,
+        H_blocks=H_blocks,
+        H_memory_size=H_memory_size,
+        T_cycles=T_cycles,
+        M_segments=M_segments,
+    )
+
+
 if __name__ == "__main__":
-    # Test the Asymmetric HRM model
+    # Test the Asymmetric HRM model with different hidden dimensions
+    print("=== Testing Asymmetric HRM with Different Hidden Dimensions ===")
     model = create_asymmetric_hrm_model()
 
     # Create dummy inputs
@@ -357,3 +423,23 @@ if __name__ == "__main__":
     print("\nModel Architecture:")
     for key, value in model_info.items():
         print(f"  {key}: {value}")
+
+    print("\n" + "=" * 60)
+    print("=== Testing Symmetric HRM with Equal Hidden Dimensions ===")
+
+    # Test the symmetric version (no projection layers)
+    symmetric_model = create_symmetric_hrm_model()
+    symmetric_outputs = symmetric_model(input_ids, puzzle_ids)
+
+    print("Symmetric HRM Model created successfully!")
+    print(f"Uses projection layers: {symmetric_model.L_to_H_proj is not None}")
+
+    # Print symmetric model information
+    symmetric_info = symmetric_model.get_model_info()
+    print("\nSymmetric Model Architecture:")
+    for key, value in symmetric_info.items():
+        print(f"  {key}: {value}")
+
+    print(
+        f"\nParameter reduction: {model_info['total_parameters'] - symmetric_info['total_parameters']:,} parameters saved by using equal dimensions"
+    )

@@ -1,4 +1,4 @@
-# HRM Asymmetric Project Snapshot - 2025-01-XX
+# HRM Asymmetric Project Snapshot - 2025-09-07_16:09
 
 ## Current Architecture
 
@@ -23,8 +23,9 @@
 - **Algorithm**: Standard HRM with M segments × T cycles
 - **Adaptive Computation**: Q-learning based halting mechanism
 - **Hierarchical Processing**: Fine-to-coarse dimension progression (768→512)
-- **Projection Layers**: L_to_H_proj, H_to_L_proj for dimension matching
-- **Total Parameters**: ~7M parameters
+- **Projection Layers**: Conditional L_to_H_proj, H_to_L_proj (only when dimensions differ)
+- **Convenience Function**: `create_symmetric_hrm_model()` for equal dimensions
+- **Total Parameters**: ~7M parameters (asymmetric) / ~6.5M parameters (symmetric)
 
 ## Active Features
 
@@ -36,6 +37,8 @@
 - ✅ Standard HRM notation (L_blocks, H_blocks, T_cycles, M_segments)
 - ✅ Hierarchical hidden dimensions (L_hidden_size=768, H_hidden_size=512)
 - ✅ Fine-to-coarse processing pipeline (CNN-inspired)
+- ✅ Conditional projection layers (only when dimensions differ)
+- ✅ Symmetric model support (equal dimensions, no projections)
 
 ### Training & Evaluation
 - ✅ Complete training pipeline (`train.py`)
@@ -76,6 +79,8 @@ HRM_asymmetric/
 - ✅ Implemented hierarchical hidden dimensions (768→512)
 - ✅ Added projection layers for dimension matching
 - ✅ Updated architecture for fine-to-coarse processing
+- ✅ Optimized projection layers (conditional creation)
+- ✅ Added symmetric model convenience function
 
 ### Current Status
 - **Development**: Complete and ready for production use
@@ -95,12 +100,25 @@ HRM_asymmetric/
 - **M_segments**: 16 (Maximum segments)
 - **H_memory_size**: 64 (Working memory size)
 
-### Usage Example
+### Usage Examples
+
+**Asymmetric Model (with projection layers):**
 ```python
 from HRM_asymmetric import create_asymmetric_hrm_model
 
 model = create_asymmetric_hrm_model(
     L_hidden_size=768, H_hidden_size=512,
+    L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16
+)
+outputs = model(input_ids, puzzle_ids)
+```
+
+**Symmetric Model (no projection layers):**
+```python
+from HRM_asymmetric import create_symmetric_hrm_model
+
+model = create_symmetric_hrm_model(
+    hidden_size=512,  # Both systems use same dimension
     L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16
 )
 outputs = model(input_ids, puzzle_ids)

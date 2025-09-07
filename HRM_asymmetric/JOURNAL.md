@@ -128,6 +128,51 @@
 
 ---
 
+## 2025-09-07_16:09 - Conditional Projection Layers Optimization
+
+### Completed Tasks ✅
+
+1. **Implemented Conditional Projection Layers**
+   - Only create projection layers when `L_hidden_size != H_hidden_size`
+   - When dimensions are equal: `self.L_to_H_proj = None` and `self.H_to_L_proj = None`
+   - Eliminates unnecessary parameters when using equal hidden dimensions
+
+2. **Added Smart Forward Pass Logic**
+   - Check if projection layers exist before using them
+   - If no projection needed: Direct tensor assignment (no computational overhead)
+   - If projection needed: Use projection layers as before
+
+3. **Created Convenience Function**
+   - `create_symmetric_hrm_model()`: Easy way to create models with equal dimensions
+   - No projection layers: Automatically eliminates unnecessary parameters
+   - Same interface: Consistent with the asymmetric version
+
+4. **Enhanced Model Information**
+   - Added `uses_projection_layers` flag to model info
+   - Easy parameter comparison between symmetric and asymmetric models
+   - Clear indication of when projections are used
+
+### Key Benefits
+
+- **Parameter Efficiency**: No projection layers when dimensions match = fewer parameters
+- **Computational Efficiency**: No unnecessary operations when dimensions are equal
+- **Memory Efficiency**: No unused projection layer parameters
+- **Flexible Architecture**: Supports both symmetric and asymmetric designs
+
+### Files Modified
+
+- `asymmetric_hrm.py` - Added conditional projection layers and convenience function
+- `JOURNAL.md` - This entry documenting the optimization
+
+### Technical Details
+
+- **Conditional Creation**: `if L_hidden_size != H_hidden_size: create projections else: None`
+- **Smart Forward Pass**: Check `self.L_to_H_proj is not None` before using
+- **Convenience Function**: `create_symmetric_hrm_model(hidden_size=512)`
+- **Parameter Savings**: Significant reduction when using equal dimensions
+
+---
+
 ## 2025-09-07_15:26 - Training Script Creation
 
 ### Completed Tasks ✅
