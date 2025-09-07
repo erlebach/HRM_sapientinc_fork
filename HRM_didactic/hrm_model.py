@@ -37,8 +37,20 @@ def apply_rotary_pos_emb(
 ]:
     """Apply rotary position embeddings to query and key tensors."""
 
-    def rotate_half(x):
-        x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+    def rotate_half(x: Float[Tensor, "... head_dim"]) -> Float[Tensor, "... head_dim"]:
+        """Rotate the last dimension of the tensor by splitting in half and swapping.
+
+        Args:
+            x: Input tensor of shape (..., head_dim), where head_dim is even.
+
+        Returns:
+            Tensor of the same shape as x, with the last dimension rotated:
+            the first half is replaced by the negated second half, and the
+            second half is replaced by the first half.
+
+        """
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2 :]
         return torch.cat((-x2, x1), dim=-1)
 
     q_embed = (q * cos) + (rotate_half(q) * sin)
@@ -166,14 +178,24 @@ class ReasoningModule(nn.Module):
         hidden_size: int,
         num_heads: int,
         intermediate_size: int,
-        num_layers: int,
+        num_blocks: int,
         max_seq_len: int,
     ):
+        """Initialize a ReasoningModule with multiple transformer blocks.
+
+        Args:
+            hidden_size: The dimensionality of the hidden representations.
+            num_heads: The number of attention heads in each transformer block.
+            intermediate_size: The size of the intermediate (MLP) layer in each block.
+            num_layers: The number of transformer blocks in the module.
+            max_seq_len: The maximum sequence length supported by the module.
+
+        """
         super().__init__()
         self.layers = nn.ModuleList(
             [
                 TransformerBlock(hidden_size, num_heads, intermediate_size, max_seq_len)
-                for _ in range(num_layers)
+                for _ in range(num_blocks)
             ]
         )
 
@@ -194,8 +216,7 @@ class ReasoningModule(nn.Module):
 
 @beartype
 class HRMModel(nn.Module):
-    """
-    Hierarchical Reasoning Model with High-level and Low-level reasoning modules.
+    """Hierarchical Reasoning Model with High-level and Low-level reasoning modules.
 
     The model operates through hierarchical recurrent processing where:
     - High-level module (H) handles slow, abstract planning
@@ -217,6 +238,22 @@ class HRMModel(nn.Module):
         l_cycles: int,
         halt_max_steps: int,
     ):
+        """Initialize the HRMModel.
+
+        Args:
+            vocab_size: The size of the vocabulary for token embeddings.
+            hidden_size: The dimensionality of the hidden representations.
+            num_heads: The number of attention heads in each transformer block.
+            intermediate_size: The size of the intermediate (MLP) layer in each block.
+            max_seq_len: The maximum sequence length supported by the model.
+            num_puzzle_ids: The number of unique puzzle/task identifiers.
+            h_layers: The number of transformer blocks in the high-level (H) module.
+            l_layers: The number of transformer blocks in the low-level (L) module.
+            h_cycles: The number of recurrent cycles for the high-level module.
+            l_cycles: The number of recurrent cycles for the low-level module.
+            halt_max_steps: The maximum number of halting steps allowed by the Q-module.
+
+        """
         super().__init__()
 
         self.hidden_size = hidden_size
@@ -242,8 +279,8 @@ class HRMModel(nn.Module):
         self.q_head = nn.Linear(hidden_size, 2, bias=True)  # halt vs continue
 
         # Initial states for H and L modules
-        self.h_init = nn.Parameter(torch.randn(hidden_size))
-        self.l_init = nn.Parameter(torch.randn(hidden_size))
+        self.h_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
+        self.l_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
 
         # Initialize Q-head to prefer continuing initially
         with torch.no_grad():
@@ -281,8 +318,7 @@ class HRMModel(nn.Module):
         Float[Tensor, "batch seq hidden"],
         Float[Tensor, "batch 2"],
     ]:
-        """
-        Single forward step through the hierarchical reasoning process.
+        """Execute a single forward step through the hierarchical reasoning process.
 
         Args:
             h_state: High-level reasoning state [batch, seq, hidden]
@@ -304,16 +340,15 @@ class HRMModel(nn.Module):
 
         # Q-values for halting decision (using first token of high-level state)
         q_logits = self.q_head(h_state[:, 0])  # [batch, 2]
-
         return h_state, l_state, q_logits
 
     def forward(
         self,
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
-        h_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
-        l_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
-        max_steps: Optional[int] = None,
+        h_state: Float[Tensor, "batch seq hidden"] | None = None,
+        l_state: Float[Tensor, "batch seq hidden"] | None = None,
+        max_steps: int | None = None,
     ) -> dict[str, Tensor]:
         """Execute forward pass through the HRM model.
 
@@ -340,11 +375,11 @@ class HRMModel(nn.Module):
 
         # Initialize states if not provided
         if h_state is None:
-            h_state = (
+            h_state: Float[Tensor, "batch seq hidden"] = (
                 self.h_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
         if l_state is None:
-            l_state = (
+            l_state: Float[Tensor, "batch seq hidden"] = (
                 self.l_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
 
@@ -353,7 +388,7 @@ class HRMModel(nn.Module):
 
         # Adaptive computation time loop
         steps_taken = 0
-        for step in range(max_steps):
+        for _ in range(max_steps):
             # Forward step through hierarchical reasoning
             h_state, l_state, q_logits = self.forward_single_step(
                 h_state, l_state, input_embeddings

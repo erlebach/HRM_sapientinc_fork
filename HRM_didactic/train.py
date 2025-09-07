@@ -69,8 +69,7 @@ class HRMTrainer:
     def compute_loss(
         self, batch: dict[str, Tensor]
     ) -> tuple[Float[Tensor, ""], dict[str, float]]:
-        """
-        Compute the total loss including language modeling and Q-learning components.
+        """Compute the total loss including language modeling and Q-learning components.
 
         Args:
             batch: Dictionary containing input_ids, target_ids, puzzle_ids
