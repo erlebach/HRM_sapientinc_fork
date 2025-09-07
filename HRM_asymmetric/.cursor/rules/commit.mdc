@@ -1,0 +1,134 @@
+# Git Commit Automation Rule
+
+## Purpose
+Automatically commit all changes since the last commit with a comprehensive, explanatory commit message.
+
+## Usage
+Run this rule to:
+1. Stage all modified files
+2. Generate a detailed commit message based on the changes
+3. Execute the commit with the generated message
+
+## Implementation
+
+### Step 1: Check Git Status
+```bash
+git status --porcelain
+```
+
+### Step 2: Stage All Changes
+```bash
+git add .
+```
+
+### Step 3: Generate Commit Message
+Analyze the changes and create a comprehensive commit message that includes:
+- **Type**: fix, feat, refactor, docs, etc.
+- **Summary**: Brief description of main changes
+- **Details**: Specific changes made
+- **Impact**: Performance, architectural, or functional improvements
+- **Files**: Key files modified
+
+### Step 4: Execute Commit
+```bash
+git commit -m "generated_message"
+```
+
+## Commit Message Template
+
+```
+<type>: <brief_summary>
+
+<detailed_description>
+
+Changes:
+- <specific_change_1>
+- <specific_change_2>
+- <specific_change_3>
+
+Impact:
+- <performance_or_functional_improvement>
+- <architectural_correction>
+- <code_quality_enhancement>
+
+Files modified:
+- <file1>: <description_of_changes>
+- <file2>: <description_of_changes>
+```
+
+## Examples
+
+### Architectural Fix
+```
+fix: correct HRM architecture - move projections and H processing outside T_cycles loop
+
+- H_to_L projection now computed once per segment (not T_cycles times)
+- H_module now processes once per segment (not T_cycles times) 
+- Aligns with standard HRM algorithm architecture
+- Significant computational efficiency improvement
+- Enhanced docstrings and type hints
+- Updated documentation (JOURNAL.md, SNAPSHOT.md)
+
+Impact:
+- Reduces redundant computations by T_cycles factor
+- Corrects total operations from T_cycles × (L_blocks + H_blocks) to T_cycles × L_blocks + H_blocks
+- Improves code maintainability and documentation
+
+Files modified:
+- asymmetric_hrm.py: Fixed projection timing and H processing frequency
+- JOURNAL.md: Added detailed architectural fix documentation
+- SNAPSHOT.md: Updated current state with fixes
+- example.py: Minor improvements and type hints
+```
+
+### Feature Addition
+```
+feat: add hierarchical hidden dimensions and projection layers
+
+- Implemented different hidden sizes for L (768) and H (512) modules
+- Added conditional projection layers for dimension matching
+- Created convenience function for symmetric models
+- Enhanced type hints and documentation
+
+Impact:
+- Enables fine-to-coarse hierarchical processing
+- Improves computational efficiency for H module
+- Maintains backward compatibility with symmetric models
+
+Files modified:
+- asymmetric_hrm.py: Added projection layers and hierarchical dimensions
+- JOURNAL.md: Documented architectural changes
+- SNAPSHOT.md: Updated current architecture
+```
+
+## Best Practices
+
+1. **Always analyze changes** before generating commit message
+2. **Use descriptive type prefixes**: fix, feat, refactor, docs, test, style
+3. **Include impact assessment** for significant changes
+4. **Reference specific files** and what changed in each
+5. **Keep summary line under 50 characters** when possible
+6. **Use bullet points** for multiple changes
+7. **Include performance implications** for architectural changes
+
+## Error Handling
+
+- If no changes detected: "No changes to commit"
+- If git not initialized: "Not a git repository"
+- If staging fails: "Failed to stage changes"
+- If commit fails: "Failed to commit changes"
+
+## Integration
+
+This rule can be integrated with:
+- Cursor IDE rules system
+- Pre-commit hooks
+- CI/CD pipelines
+- Development workflows
+
+## Notes
+
+- Always review generated commit message before executing
+- Consider breaking large changes into multiple commits
+- Use conventional commit format for better tooling support
+- Maintain consistency with project commit history

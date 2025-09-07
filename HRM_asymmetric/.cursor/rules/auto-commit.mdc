@@ -1,0 +1,114 @@
+# Auto-Commit Rule for Cursor
+
+## Purpose
+Automatically commit all changes with a comprehensive, explanatory commit message.
+
+## Implementation
+
+### Step 1: Check for changes
+```bash
+git status --porcelain
+```
+
+### Step 2: Stage all changes
+```bash
+git add .
+```
+
+### Step 3: Generate intelligent commit message
+Analyze the changes and create a commit message based on:
+
+**File Analysis:**
+- `asymmetric_hrm.py`: Code changes (architectural fixes, features, refactoring)
+- `JOURNAL.md`: Documentation updates (development history)
+- `SNAPSHOT.md`: Documentation updates (current state)
+- `example.py`: Example/demo improvements
+- `train.py`: Training script changes
+- `test_*.py`: Test improvements
+
+**Change Type Detection:**
+- **fix**: Architectural corrections, bug fixes
+- **feat**: New features, major additions
+- **refactor**: Code improvements, restructuring
+- **docs**: Documentation updates
+- **test**: Test-related changes
+- **style**: Formatting, minor improvements
+
+### Step 4: Execute commit
+```bash
+git commit -m "generated_message"
+```
+
+## Commit Message Template
+
+```
+<type>: <brief_summary>
+
+<detailed_changes>
+
+Impact:
+<performance_or_functional_improvements>
+
+Files modified:
+<file_specific_changes>
+```
+
+## Examples
+
+### Architectural Fix
+```
+fix: correct HRM architecture - move projections and H processing outside T_cycles loop
+
+- H_to_L projection now computed once per segment (not T_cycles times)
+- H_module now processes once per segment (not T_cycles times)
+- Aligns with standard HRM algorithm architecture
+- Significant computational efficiency improvement
+
+Impact:
+- Reduces redundant computations by T_cycles factor
+- Corrects total operations from T_cycles × (L_blocks + H_blocks) to T_cycles × L_blocks + H_blocks
+
+Files modified:
+- asymmetric_hrm.py: Fixed projection timing and H processing frequency
+- JOURNAL.md: Added detailed architectural fix documentation
+- SNAPSHOT.md: Updated current state with fixes
+```
+
+### Documentation Update
+```
+docs: update project documentation and tracking
+
+- Updated JOURNAL.md with development history
+- Updated SNAPSHOT.md with current project state
+- Enhanced documentation consistency
+
+Impact:
+- Improved project documentation and tracking
+- Better development history maintenance
+
+Files modified:
+- JOURNAL.md: Added development history entries
+- SNAPSHOT.md: Updated current state information
+```
+
+## Usage in Cursor
+
+1. **Manual execution**: Run the script when ready to commit
+2. **Integration**: Use as part of development workflow
+3. **Customization**: Modify message templates as needed
+
+## Best Practices
+
+- Always review generated message before committing
+- Use descriptive type prefixes
+- Include impact assessment for significant changes
+- Reference specific files and changes
+- Keep summary concise but informative
+- Use bullet points for multiple changes
+
+## Error Handling
+
+- No changes: "No changes to commit"
+- Not git repo: "Not a git repository"
+- Staging fails: "Failed to stage changes"
+- Commit fails: "Failed to commit changes"
