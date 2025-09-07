@@ -8,12 +8,15 @@ Key differences from the original HRM:
 - System 2 (H): Sophisticated reasoning with working memory and attention to history
 - Asymmetric processing blocks and complexity
 - Specialized architectures for different reasoning types
+- Different hidden dimensions: L_hidden_size > H_hidden_size (fine-to-coarse hierarchy)
 
 Standard HRM Notation:
 - M: Number of segments (reasoning steps)
 - T: Number of cycles per segment (same for L and H)
 - L_blocks: Number of transformer blocks in Low-level module
 - H_blocks: Number of transformer blocks in High-level module
+- L_hidden_size: Hidden dimension for System 1 (fine-grained)
+- H_hidden_size: Hidden dimension for System 2 (coarse-grained)
 """
 
 import math
@@ -44,16 +47,22 @@ class AsymmetricHRMModel(nn.Module):
     with System 1 handling rapid pattern recognition and System 2 performing
     complex reasoning with working memory.
 
+    Key architectural innovation:
+    - L_hidden_size > H_hidden_size: Fine-to-coarse hierarchical processing
+    - Similar to CNN progression from fine-grained to abstract representations
+
     Standard HRM Algorithm:
     - M segments (reasoning steps)
     - T cycles per segment (same for L and H)
     - L_blocks/H_blocks transformer blocks per module
+    - L_hidden_size/H_hidden_size different dimensions per module
     """
 
     def __init__(
         self,
         vocab_size: int,
-        hidden_size: int,
+        L_hidden_size: int,  # System 1 hidden dimension (fine-grained)
+        H_hidden_size: int,  # System 2 hidden dimension (coarse-grained)
         num_heads: int,
         intermediate_size: int,
         max_seq_len: int,
@@ -69,18 +78,19 @@ class AsymmetricHRMModel(nn.Module):
     ):
         super().__init__()
 
-        self.hidden_size = hidden_size
+        self.L_hidden_size = L_hidden_size
+        self.H_hidden_size = H_hidden_size
         self.T_cycles = T_cycles
         self.M_segments = M_segments
 
-        # Embeddings
-        self.token_embedding = nn.Embedding(vocab_size, hidden_size)
-        self.puzzle_embedding = nn.Embedding(num_puzzle_ids, hidden_size)
-        self.embed_scale = math.sqrt(hidden_size)
+        # Embeddings - use L_hidden_size as base (fine-grained input)
+        self.token_embedding = nn.Embedding(vocab_size, L_hidden_size)
+        self.puzzle_embedding = nn.Embedding(num_puzzle_ids, L_hidden_size)
+        self.embed_scale = math.sqrt(L_hidden_size)
 
-        # HRM reasoning modules
+        # HRM reasoning modules with different hidden sizes
         self.L_module = System1Module(
-            hidden_size=hidden_size,
+            hidden_size=L_hidden_size,
             num_heads=num_heads,
             intermediate_size=intermediate_size,
             num_layers=L_blocks,
@@ -88,7 +98,7 @@ class AsymmetricHRMModel(nn.Module):
         )
 
         self.H_module = System2Module(
-            hidden_size=hidden_size,
+            hidden_size=H_hidden_size,
             num_heads=num_heads,
             intermediate_size=intermediate_size,
             num_layers=H_blocks,
@@ -96,13 +106,17 @@ class AsymmetricHRMModel(nn.Module):
             memory_size=H_memory_size,
         )
 
-        # Output heads
-        self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
-        self.q_head = nn.Linear(hidden_size, 2, bias=True)  # halt vs continue
+        # Projection layers for dimension matching
+        self.L_to_H_proj = nn.Linear(L_hidden_size, H_hidden_size, bias=False)
+        self.H_to_L_proj = nn.Linear(H_hidden_size, L_hidden_size, bias=False)
+
+        # Output heads - use H_hidden_size for final predictions (abstract reasoning)
+        self.lm_head = nn.Linear(H_hidden_size, vocab_size, bias=False)
+        self.q_head = nn.Linear(H_hidden_size, 2, bias=True)  # halt vs continue
 
         # Initial states for L and H modules
-        self.L_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
-        self.H_init: Tensor = nn.parameter.Parameter(torch.randn(hidden_size))
+        self.L_init: Tensor = nn.parameter.Parameter(torch.randn(L_hidden_size))
+        self.H_init: Tensor = nn.parameter.Parameter(torch.randn(H_hidden_size))
 
         # Initialize Q-head to prefer continuing initially
         with torch.no_grad():
@@ -113,7 +127,7 @@ class AsymmetricHRMModel(nn.Module):
         self,
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
-    ) -> Float[Tensor, "batch seq hidden"]:
+    ) -> Float[Tensor, "batch seq L_hidden"]:
         """Get input embeddings with puzzle-specific conditioning."""
         # Token embeddings
         token_emb = self.token_embedding(input_ids)
@@ -121,10 +135,10 @@ class AsymmetricHRMModel(nn.Module):
         # Puzzle embeddings (broadcast to sequence length)
         puzzle_emb = self.puzzle_embedding(puzzle_ids).unsqueeze(
             1
-        )  # [batch, 1, hidden]
+        )  # [batch, 1, L_hidden]
         puzzle_emb = puzzle_emb.expand(
             -1, input_ids.size(1), -1
-        )  # [batch, seq, hidden]
+        )  # [batch, seq, L_hidden]
 
         # Combine embeddings
         embeddings = token_emb + puzzle_emb
@@ -132,20 +146,20 @@ class AsymmetricHRMModel(nn.Module):
 
     def forward_single_segment(
         self,
-        L_state: Float[Tensor, "batch seq hidden"],
-        H_state: Float[Tensor, "batch seq hidden"],
-        input_embeddings: Float[Tensor, "batch seq hidden"],
+        L_state: Float[Tensor, "batch seq L_hidden"],
+        H_state: Float[Tensor, "batch seq H_hidden"],
+        input_embeddings: Float[Tensor, "batch seq L_hidden"],
     ) -> tuple[
-        Float[Tensor, "batch seq hidden"],
-        Float[Tensor, "batch seq hidden"],
+        Float[Tensor, "batch seq L_hidden"],
+        Float[Tensor, "batch seq H_hidden"],
         Float[Tensor, "batch 2"],
     ]:
         """Execute a single HRM segment with T cycles.
 
         Args:
-            L_state: Low-level state [batch, seq, hidden]
-            H_state: High-level state [batch, seq, hidden]
-            input_embeddings: Input embeddings [batch, seq, hidden]
+            L_state: Low-level state [batch, seq, L_hidden]
+            H_state: High-level state [batch, seq, H_hidden]
+            input_embeddings: Input embeddings [batch, seq, L_hidden]
 
         Returns:
             new_L_state: Updated Low-level state
@@ -155,13 +169,15 @@ class AsymmetricHRMModel(nn.Module):
         # T cycles per segment (standard HRM algorithm)
         for _ in range(self.T_cycles):
             # L processing (L_blocks iterations within each T cycle)
-            # L receives input + H state for context
-            L_input = H_state + input_embeddings
+            # L receives input + projected H state for context
+            H_to_L = self.H_to_L_proj(H_state)  # [batch, seq, L_hidden]
+            L_input = H_to_L + input_embeddings
             L_state = self.L_module(L_state, L_input)
 
             # H processing (H_blocks iterations within each T cycle)
-            # H receives L state for context
-            H_input = L_state + input_embeddings
+            # H receives projected L state for context
+            L_to_H = self.L_to_H_proj(L_state)  # [batch, seq, H_hidden]
+            H_input = L_to_H + self.L_to_H_proj(input_embeddings)
             H_state = self.H_module(H_state, H_input)
 
         # Q-values for halting decision (using first token of H state)
@@ -173,8 +189,8 @@ class AsymmetricHRMModel(nn.Module):
         self,
         input_ids: Int[Tensor, "batch seq"],
         puzzle_ids: Int[Tensor, "batch"],
-        L_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
-        H_state: Optional[Float[Tensor, "batch seq hidden"]] = None,
+        L_state: Optional[Float[Tensor, "batch seq L_hidden"]] = None,
+        H_state: Optional[Float[Tensor, "batch seq H_hidden"]] = None,
         max_segments: Optional[int] = None,
     ) -> dict[str, Tensor]:
         """Execute forward pass through the Asymmetric HRM model.
@@ -200,11 +216,11 @@ class AsymmetricHRMModel(nn.Module):
 
         # Initialize states if not provided
         if L_state is None:
-            L_state: Float[Tensor, "batch seq hidden"] = (
+            L_state: Float[Tensor, "batch seq L_hidden"] = (
                 self.L_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
         if H_state is None:
-            H_state: Float[Tensor, "batch seq hidden"] = (
+            H_state: Float[Tensor, "batch seq H_hidden"] = (
                 self.H_init.unsqueeze(0).unsqueeze(0).expand(batch_size, seq_len, -1)
             )
 
@@ -260,14 +276,16 @@ class AsymmetricHRMModel(nn.Module):
             "T_cycles": self.T_cycles,
             "M_segments": self.M_segments,
             "H_memory_size": self.H_module.memory_size,
-            "hidden_size": self.hidden_size,
+            "L_hidden_size": self.L_hidden_size,
+            "H_hidden_size": self.H_hidden_size,
         }
 
 
 @beartype
 def create_asymmetric_hrm_model(
     vocab_size: int = 1000,
-    hidden_size: int = 512,
+    L_hidden_size: int = 768,  # System 1: Fine-grained processing
+    H_hidden_size: int = 512,  # System 2: Coarse-grained processing
     num_heads: int = 8,
     intermediate_size: int = 2048,
     max_seq_len: int = 128,
@@ -285,7 +303,8 @@ def create_asymmetric_hrm_model(
 
     Args:
         vocab_size: Vocabulary size
-        hidden_size: Hidden dimension size
+        L_hidden_size: System 1 hidden dimension (fine-grained, larger)
+        H_hidden_size: System 2 hidden dimension (coarse-grained, smaller)
         num_heads: Number of attention heads
         intermediate_size: MLP intermediate size
         max_seq_len: Maximum sequence length
@@ -301,7 +320,8 @@ def create_asymmetric_hrm_model(
     """
     return AsymmetricHRMModel(
         vocab_size=vocab_size,
-        hidden_size=hidden_size,
+        L_hidden_size=L_hidden_size,
+        H_hidden_size=H_hidden_size,
         num_heads=num_heads,
         intermediate_size=intermediate_size,
         max_seq_len=max_seq_len,

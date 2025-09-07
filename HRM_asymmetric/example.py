@@ -36,7 +36,8 @@ def demonstrate_system_differences() -> None:
     # Create a small model for demonstration
     model = create_asymmetric_hrm_model(
         vocab_size=100,
-        hidden_size=128,
+        L_hidden_size=128,
+        H_hidden_size=128,
         num_heads=4,
         intermediate_size=256,
         max_seq_len=32,
@@ -92,7 +93,8 @@ def demonstrate_reasoning_history() -> None:
 
     model = create_asymmetric_hrm_model(
         vocab_size=50,
-        hidden_size=64,
+        L_hidden_size=64,
+        H_hidden_size=64,
         num_heads=2,
         intermediate_size=128,
         max_seq_len=16,
@@ -139,7 +141,8 @@ def demonstrate_adaptive_computation() -> None:
 
     model = create_asymmetric_hrm_model(
         vocab_size=200,
-        hidden_size=96,
+        L_hidden_size=96,
+        H_hidden_size=96,
         num_heads=3,
         intermediate_size=192,
         max_seq_len=24,
@@ -186,7 +189,8 @@ def demonstrate_parameter_efficiency() -> None:
     # Create Asymmetric HRM
     asymmetric_model = create_asymmetric_hrm_model(
         vocab_size=1000,
-        hidden_size=512,
+        L_hidden_size=512,
+        H_hidden_size=512,
         num_heads=8,
         intermediate_size=2048,
         max_seq_len=128,
