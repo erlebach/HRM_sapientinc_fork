@@ -12,17 +12,20 @@ Key differences from the original HRM:
 """
 
 import math
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from beartype import beartype
 from jaxtyping import Float, Int
-from torch import Tensor
 
-from .system1_module import System1Module
-from .system2_module import System2Module
+# from .system1_module import System1Module
+from system1_module import System1Module
+
+# from .system2_module import System2Module
+from system2_module import System2Module
+from torch import Tensor
 
 
 @beartype
@@ -32,7 +35,7 @@ class AsymmetricHRMModel(nn.Module):
     This model implements Kahneman's dual-process theory:
     - System 1 (Low-level): Fast, intuitive processing like an LLM
     - System 2 (High-level): Deliberate, analytical processing with memory
-    
+
     The architecture allows for different processing strategies at each level,
     with System 1 handling rapid pattern recognition and System 2 performing
     complex reasoning with working memory.
@@ -76,7 +79,7 @@ class AsymmetricHRMModel(nn.Module):
             num_layers=s1_layers,
             max_seq_len=max_seq_len,
         )
-        
+
         self.system2 = System2Module(
             hidden_size=hidden_size,
             num_heads=num_heads,
@@ -109,8 +112,12 @@ class AsymmetricHRMModel(nn.Module):
         token_emb = self.token_embedding(input_ids)
 
         # Puzzle embeddings (broadcast to sequence length)
-        puzzle_emb = self.puzzle_embedding(puzzle_ids).unsqueeze(1)  # [batch, 1, hidden]
-        puzzle_emb = puzzle_emb.expand(-1, input_ids.size(1), -1)  # [batch, seq, hidden]
+        puzzle_emb = self.puzzle_embedding(puzzle_ids).unsqueeze(
+            1
+        )  # [batch, 1, hidden]
+        puzzle_emb = puzzle_emb.expand(
+            -1, input_ids.size(1), -1
+        )  # [batch, seq, hidden]
 
         # Combine embeddings
         embeddings = token_emb + puzzle_emb
@@ -207,14 +214,13 @@ class AsymmetricHRMModel(nn.Module):
             steps_taken += 1
 
             # Check if we should halt (during training, use Q-values; during eval, use max steps)
-            if not self.training:
-                break
-
-            # Halt if Q-values suggest stopping
-            halt_logits, continue_logits = q_logits[:, 0], q_logits[:, 1]
-            should_halt = halt_logits > continue_logits
-            if should_halt.all():
-                break
+            if self.training:
+                # In training mode, check Q-values for early stopping
+                halt_logits, continue_logits = q_logits[:, 0], q_logits[:, 1]
+                should_halt = halt_logits > continue_logits
+                if should_halt.all():
+                    break
+            # In eval mode, continue for max_steps (don't break early)
 
         # Generate final predictions using System 2 state (more sophisticated)
         logits = self.lm_head(s2_state)
@@ -237,7 +243,7 @@ class AsymmetricHRMModel(nn.Module):
         s1_params = sum(p.numel() for p in self.system1.parameters())
         s2_params = sum(p.numel() for p in self.system2.parameters())
         total_params = sum(p.numel() for p in self.parameters())
-        
+
         return {
             "total_parameters": total_params,
             "system1_parameters": s1_params,
@@ -270,7 +276,7 @@ def create_asymmetric_hrm_model(
     halt_max_steps: int = 16,
 ) -> AsymmetricHRMModel:
     """Create an Asymmetric HRM model with System 1/System 2 architecture.
-    
+
     Args:
         vocab_size: Vocabulary size
         hidden_size: Hidden dimension size
@@ -284,7 +290,7 @@ def create_asymmetric_hrm_model(
         s2_cycles: Number of processing cycles in System 2 (fewer but complex)
         s2_memory_size: Working memory size in System 2
         halt_max_steps: Maximum computation steps
-        
+
     Returns:
         Configured AsymmetricHRMModel
     """
@@ -321,7 +327,7 @@ if __name__ == "__main__":
     print(f"Output logits shape: {outputs['logits'].shape}")
     print(f"Q-values shape: {outputs['q_halt_logits'].shape}")
     print(f"Steps taken: {outputs['steps_taken']}")
-    
+
     # Print model information
     model_info = model.get_model_info()
     print("\nModel Architecture:")
