@@ -76,19 +76,6 @@ class WorkingMemory(nn.Module):
 
     Maintains a persistent memory of previous reasoning steps
     that can be attended to during current processing.
-
-    Relation to Reasoning History:
-        - Working memory is a persistent, learnable buffer that stores
-          abstracted knowledge or representations across tasks and sequences.
-        - Reasoning history, in contrast, is a temporary buffer that
-          accumulates recent reasoning steps within a session for
-          short-term, context-aware processing.
-        - Both are used by System 2: working memory provides stable,
-          reusable context, while reasoning history enables dynamic,
-          session-specific reasoning.
-        - The model can attend to both, combining persistent knowledge
-          (working memory) with recent context (reasoning history) for
-          more sophisticated, deliberative reasoning.
     """
 
     def __init__(self, hidden_size: int, memory_size: int):
@@ -109,13 +96,6 @@ class WorkingMemory(nn.Module):
         update_memory: bool = True,
     ) -> Float[Tensor, "batch seq hidden"]:
         """Update working memory and return memory-enhanced state.
-
-        Working memory is used to provide persistent, reusable context
-        for System 2's reasoning process. It is distinct from reasoning
-        history, which buffers recent steps for short-term context.
-        By attending to working memory, the model can incorporate
-        stable knowledge alongside the dynamic, session-specific
-        information from reasoning history.
 
         Args:
             current_state: Current reasoning state [batch, seq, hidden]
@@ -299,6 +279,8 @@ class System2Block(nn.Module):
             Updated state [batch, seq, hidden]
         """
         # Working memory enhancement
+        # Experiment with memory before attention, after attention, and
+        # in parallel with attention or in combination.
         x = self.working_memory(x, update_memory=True)
 
         # Self-attention with reasoning history
@@ -350,14 +332,14 @@ class System2Module(nn.Module):
         )
 
         # Reasoning history buffer
-        self.reasoning_history: Optional[Float[Tensor, "batch prev_seq hidden"]] = None
+        self.reasoning_history: Float[Tensor, "batch prev_seq hidden"] | None = None
         self.max_history_length = 10
 
     def forward(
         self,
         hidden_states: Float[Tensor, "batch seq hidden"],
         input_injection: Float[Tensor, "batch seq hidden"],
-        reasoning_history: Optional[Float[Tensor, "batch prev_seq hidden"]] = None,
+        reasoning_history: Float[Tensor, "batch prev_seq hidden"] | None = None,
     ) -> Float[Tensor, "batch seq hidden"]:
         """Deliberate forward pass with memory and reasoning history.
 
@@ -386,32 +368,7 @@ class System2Module(nn.Module):
     def _update_reasoning_history(
         self, current_state: Float[Tensor, "batch seq hidden"]
     ) -> None:
-        """Update the reasoning history buffer with the latest state.
-
-        This function maintains a buffer of previous reasoning steps (the
-        reasoning history) for the System 2 module. When called, it appends
-        the current state tensor to the existing reasoning history along the
-        sequence dimension. If the combined history exceeds the maximum
-        allowed length (`self.max_history_length`), only the most recent
-        steps are retained. This enables the model to attend to a fixed-size
-        window of recent reasoning steps for more sophisticated, context-aware
-        processing.
-
-        Working memory and reasoning history serve complementary roles:
-        - Working memory stores persistent, learnable knowledge across tasks or sequences.
-        - Reasoning history temporarily buffers recent reasoning steps for short-term,
-          context-aware processing within a session.
-        Both contribute context for System 2's reasoning, but serve different purposes.
-
-        Args:
-            current_state: The current reasoning state tensor of shape
-                [batch, seq, hidden], representing the latest output of the
-                System 2 module.
-
-        Returns:
-            None. Updates `self.reasoning_history` in-place.
-
-        """
+        """Update the reasoning history buffer."""
         if self.reasoning_history is None:
             self.reasoning_history = current_state
         else:

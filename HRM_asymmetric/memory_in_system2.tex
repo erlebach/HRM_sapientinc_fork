@@ -1,0 +1,266 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{geometry}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\geometry{margin=1in}
+
+\title{System2Module Forward Pass: Memory-Enhanced Reasoning Architecture}
+\author{Mathematical Analysis}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+The System2Module implements Kahneman's System 2 thinking through a sophisticated transformer architecture with persistent working memory. The forward pass combines input injection, multi-layer processing with memory enhancement, and reasoning history maintenance.
+
+\section{Mathematical Formulation}
+
+\subsection{Input Processing}
+
+Given inputs:
+\begin{align}
+\mathbf{H} &\in \mathbb{R}^{B \times S \times D} \quad \text{(hidden states)} \\
+\mathbf{I} &\in \mathbb{R}^{B \times S \times D} \quad \text{(input injection)} \\
+\mathbf{R} &\in \mathbb{R}^{B \times P \times D} \quad \text{(reasoning history, optional)}
+\end{align}
+
+where $B$ is batch size, $S$ is sequence length, $D$ is hidden dimension, and $P$ is previous sequence length.
+
+\subsection{Input Injection}
+
+The first operation combines hidden states with input injection:
+
+\begin{equation}
+\mathbf{H}^{(0)} = \mathbf{H} + \mathbf{I} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\textbf{Design Decision:} Simple addition is used rather than gating. This choice assumes that input injection should be additive rather than selective, allowing the model to learn appropriate combinations through subsequent layers.
+
+\subsection{Layer-wise Processing}
+
+For each layer $l \in \{1, 2, \ldots, L\}$ where $L$ is the number of effective layers:
+
+\subsubsection{Working Memory Enhancement}
+
+The working memory mechanism operates on the current state $\mathbf{x} = \mathbf{H}^{(l-1)}$:
+
+\begin{enumerate}
+\item \textbf{Memory Attention Computation:}
+\begin{equation}
+\mathbf{A} = \mathbf{x} \mathbf{M}^T \in \mathbb{R}^{B \times S \times M}
+\end{equation}
+where $\mathbf{M} \in \mathbb{R}^{M \times D}$ is the learnable memory buffer with $M$ memory slots.
+
+\item \textbf{Attention Weight Normalization:}
+\begin{equation}
+\mathbf{W} = \text{softmax}(\mathbf{A}, \text{dim}=-1) \in \mathbb{R}^{B \times S \times M}
+\end{equation}
+
+\item \textbf{Memory Retrieval:}
+\begin{equation}
+\mathbf{R}_{\text{mem}} = \mathbf{W} \mathbf{M} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\item \textbf{State Enhancement:}
+\begin{equation}
+\mathbf{x}_{\text{enhanced}} = \mathbf{x} + \mathbf{R}_{\text{mem}} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+\end{enumerate}
+
+\textbf{Design Decision:} Memory retrieval uses attention weights rather than gating. This allows for soft, weighted combination of memory slots rather than binary selection. The addition operation assumes memory should be additive rather than replacing current information.
+
+\subsubsection{Memory Update Mechanism (Placeholder)}
+
+When $\text{update\_memory} = \text{True}$:
+
+\begin{enumerate}
+\item \textbf{Representative Selection:}
+\begin{equation}
+\mathbf{r} = \mathbf{x}[:, 0, :] \in \mathbb{R}^{B \times D}
+\end{equation}
+
+\item \textbf{Update Gate Computation:}
+\begin{equation}
+\mathbf{g} = \sigma(\mathbf{W}_{\text{gate}} \mathbf{r}) \in \mathbb{R}^{B \times M}
+\end{equation}
+where $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{M \times D}$ and $\sigma$ is the sigmoid function.
+
+\item \textbf{Memory Update Preparation:}
+\begin{equation}
+\mathbf{u} = \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix} \in \mathbb{R}^{B \times D}
+\end{equation}
+where $\bar{\mathbf{m}} = \frac{1}{M}\sum_{i=1}^{M} \mathbf{M}[i, :] \in \mathbb{R}^{D}$ and $\mathbf{W}_{\text{update}} \in \mathbb{R}^{D \times 2D}$.
+
+\item \textbf{Memory Update Application:}
+\begin{equation}
+\mathbf{M} \leftarrow \mathbf{M} \quad \text{(placeholder - no actual update)}
+\end{equation}
+\end{enumerate}
+
+\textbf{Design Decision:} The first token is used as representative rather than averaging all tokens. This choice prioritizes computational efficiency and follows transformer conventions where the first position often contains special tokens. The concatenation of representative and memory mean provides both current and historical context.
+
+\subsubsection{Sophisticated Attention}
+
+The attention mechanism processes the memory-enhanced state:
+
+\begin{enumerate}
+\item \textbf{Query, Key, Value Projections:}
+\begin{align}
+\mathbf{Q} &= \mathbf{W}_q \mathbf{x}_{\text{enhanced}} \in \mathbb{R}^{B \times S \times D} \\
+\mathbf{K} &= \mathbf{W}_k \mathbf{x}_{\text{enhanced}} \in \mathbb{R}^{B \times S \times D} \\
+\mathbf{V} &= \mathbf{W}_v \mathbf{x}_{\text{enhanced}} \in \mathbb{R}^{B \times S \times D}
+\end{align}
+
+\item \textbf{Multi-Head Reshaping:}
+\begin{align}
+\mathbf{Q} &\in \mathbb{R}^{B \times H \times S \times D_h} \\
+\mathbf{K} &\in \mathbb{R}^{B \times H \times S \times D_h} \\
+\mathbf{V} &\in \mathbb{R}^{B \times H \times S \times D_h}
+\end{align}
+where $H$ is the number of heads and $D_h = D/H$.
+
+\item \textbf{Rotary Position Embedding:}
+\begin{align}
+\mathbf{Q}' &= \mathbf{Q} \odot \cos(\boldsymbol{\Theta}) + \text{rotate}(\mathbf{Q}) \odot \sin(\boldsymbol{\Theta}) \\
+\mathbf{K}' &= \mathbf{K} \odot \cos(\boldsymbol{\Theta}) + \text{rotate}(\mathbf{K}) \odot \sin(\boldsymbol{\Theta})
+\end{align}
+where $\boldsymbol{\Theta} \in \mathbb{R}^{S \times D_h}$ contains position-dependent frequencies.
+
+\item \textbf{Scaled Dot-Product Attention:}
+\begin{equation}
+\mathbf{A}_{\text{attn}} = \text{softmax}\left(\frac{\mathbf{Q}' \mathbf{K}'^T}{\sqrt{D_h}}\right) \in \mathbb{R}^{B \times H \times S \times S}
+\end{equation}
+
+\item \textbf{Attention Output:}
+\begin{equation}
+\mathbf{O}_{\text{attn}} = \mathbf{A}_{\text{attn}} \mathbf{V} \in \mathbb{R}^{B \times H \times S \times D_h}
+\end{equation}
+
+\item \textbf{Reshape and Project:}
+\begin{equation}
+\mathbf{O}_{\text{attn}} \in \mathbb{R}^{B \times S \times D} \rightarrow \mathbf{W}_{\text{out}} \mathbf{O}_{\text{attn}} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\item \textbf{Reasoning History Attention (if available):}
+\begin{equation}
+\mathbf{O}_{\text{hist}}, \_ = \text{MultiHeadAttention}(\mathbf{O}_{\text{attn}}, \mathbf{R}, \mathbf{R}) \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\item \textbf{Final Attention Output:}
+\begin{equation}
+\mathbf{O}_{\text{final}} = \mathbf{O}_{\text{attn}} + \mathbf{O}_{\text{hist}} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+\end{enumerate}
+
+\textbf{Design Decision:} Reasoning history is combined via addition rather than concatenation or gating. This maintains dimensional consistency while allowing the model to learn appropriate combinations through residual connections.
+
+\subsubsection{Residual Connection and Normalization}
+
+\begin{equation}
+\mathbf{x}_{\text{attn}} = \mathbf{x}_{\text{enhanced}} + \mathbf{O}_{\text{final}} \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\begin{equation}
+\mathbf{x}_{\text{norm1}} = \text{RMSNorm}(\mathbf{x}_{\text{attn}}) \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+where RMSNorm is defined as:
+\begin{equation}
+\text{RMSNorm}(\mathbf{x}) = \mathbf{x} \odot \frac{1}{\sqrt{\frac{1}{D}\sum_{i=1}^{D} x_i^2 + \epsilon}}
+\end{equation}
+
+\subsubsection{MLP Processing (SwiGLU)}
+
+\begin{enumerate}
+\item \textbf{Gate and Up Projections:}
+\begin{align}
+\mathbf{G} &= \mathbf{W}_{\text{gate}} \mathbf{x}_{\text{norm1}} \in \mathbb{R}^{B \times S \times D_{\text{int}}} \\
+\mathbf{U} &= \mathbf{W}_{\text{up}} \mathbf{x}_{\text{norm1}} \in \mathbb{R}^{B \times S \times D_{\text{int}}}
+\end{align}
+
+\item \textbf{Gated Activation:}
+\begin{equation}
+\mathbf{O}_{\text{mlp}} = \mathbf{W}_{\text{down}} (\text{SiLU}(\mathbf{G}) \odot \mathbf{U}) \in \mathbb{R}^{B \times S \times D}
+\end{equation}
+
+\item \textbf{Residual Connection and Normalization:}
+\begin{align}
+\mathbf{x}_{\text{mlp}} &= \mathbf{x}_{\text{norm1}} + \mathbf{O}_{\text{mlp}} \in \mathbb{R}^{B \times S \times D} \\
+\mathbf{x}_{\text{final}} &= \text{RMSNorm}(\mathbf{x}_{\text{mlp}}) \in \mathbb{R}^{B \times S \times D}
+\end{align}
+\end{enumerate}
+
+\textbf{Design Decision:} SwiGLU uses element-wise multiplication ($\odot$) rather than addition for gating. This allows for more sophisticated non-linear combinations and has shown superior performance in modern language models.
+
+\subsection{Reasoning History Update}
+
+After processing all layers, if in training mode:
+
+\begin{equation}
+\mathbf{R}_{\text{new}} = \begin{cases}
+\mathbf{H}^{(L)} & \text{if } \mathbf{R} = \text{None} \\
+\text{concat}(\mathbf{R}, \mathbf{H}^{(L)})[:, -P_{\max}:, :] & \text{otherwise}
+\end{cases}
+\end{equation}
+
+where $P_{\max}$ is the maximum history length.
+
+\textbf{Design Decision:} Concatenation is used for history accumulation rather than averaging or gating. This preserves the temporal sequence of reasoning steps, allowing the model to attend to specific historical positions.
+
+\section{Algorithm Summary}
+
+\begin{algorithm}
+\caption{System2Module Forward Pass}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} $\mathbf{H} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{I} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{R} \in \mathbb{R}^{B \times P \times D}$
+\STATE $\mathbf{H}^{(0)} \leftarrow \mathbf{H} + \mathbf{I}$
+\FOR{$l = 1$ to $L$}
+    \STATE $\mathbf{x} \leftarrow \mathbf{H}^{(l-1)}$
+    \STATE $\mathbf{x}_{\text{enhanced}} \leftarrow \text{WorkingMemory}(\mathbf{x})$
+    \STATE $\mathbf{x}_{\text{attn}} \leftarrow \mathbf{x}_{\text{enhanced}} + \text{Attention}(\mathbf{x}_{\text{enhanced}}, \mathbf{R})$
+    \STATE $\mathbf{x}_{\text{norm1}} \leftarrow \text{RMSNorm}(\mathbf{x}_{\text{attn}})$
+    \STATE $\mathbf{x}_{\text{mlp}} \leftarrow \mathbf{x}_{\text{norm1}} + \text{SwiGLU}(\mathbf{x}_{\text{norm1}})$
+    \STATE $\mathbf{H}^{(l)} \leftarrow \text{RMSNorm}(\mathbf{x}_{\text{mlp}})$
+\ENDFOR
+\IF{training}
+    \STATE $\mathbf{R} \leftarrow \text{UpdateHistory}(\mathbf{H}^{(L)})$
+\ENDIF
+\STATE \textbf{Return:} $\mathbf{H}^{(L)}$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Design Analysis}
+
+\subsection{Combination Strategies}
+
+\begin{itemize}
+\item \textbf{Addition vs. Concatenation:} Addition is used for residual connections and memory enhancement, maintaining dimensional consistency while allowing learned combinations. Concatenation is used for history accumulation to preserve temporal information.
+
+\item \textbf{Gating vs. Attention:} Memory retrieval uses attention for soft, weighted combinations. MLP processing uses gating (SwiGLU) for non-linear feature interactions.
+
+\item \textbf{Representative Selection:} First token selection prioritizes efficiency over information content, relying on the loss function to adapt the choice.
+
+\end{itemize}
+
+\subsection{Memory Architecture}
+
+The working memory mechanism implements a read-only memory system where:
+\begin{itemize}
+\item Memory slots are learnable parameters that remain static during training
+\item Attention-based retrieval allows soft access to memory contents
+\item Update mechanism is computed but not applied (placeholder implementation)
+\end{itemize}
+
+This design provides a foundation for persistent memory while maintaining computational efficiency and gradient flow.
+
+\end{document}
