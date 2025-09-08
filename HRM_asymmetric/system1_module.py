@@ -188,7 +188,8 @@ class System1Module(nn.Module):
         self.num_layers = num_layers
 
         # Fewer layers for System 1 (speed over depth)
-        effective_layers = max(1, num_layers // 2)
+        # effective_layers = max(1, num_layers // 2)
+        effective_layers = num_layers
 
         self.layers = nn.ModuleList(
             [
@@ -207,6 +208,13 @@ class System1Module(nn.Module):
         Args:
             hidden_states: Current state [batch, seq, hidden]
             input_injection: Input to inject [batch, seq, hidden]
+
+        input_injection is an additional input tensor (same shape as
+        hidden_states) that is directly added to the transformer's
+        hidden states. This allows external information or new input
+        features to be incorporated at each forward pass, enabling
+        fast, shallow integration of new data—consistent with
+        System 1's rapid, intuitive processing.
 
         Returns:
             Updated hidden states [batch, seq, hidden]
