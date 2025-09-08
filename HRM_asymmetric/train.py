@@ -359,7 +359,8 @@ def train_model(
     print("Creating Asymmetric HRM model...")
     model = create_asymmetric_hrm_model(
         vocab_size=1000,
-        hidden_size=256,  # Smaller for faster training
+        L_hidden_size=256,  # Smaller for faster training
+        H_hidden_size=256,  # Smaller for faster training
         num_heads=8,
         intermediate_size=1024,
         max_seq_len=64,

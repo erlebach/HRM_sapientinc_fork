@@ -54,12 +54,10 @@ def demonstrate_system_differences() -> None:
 
     # Create sample data
     input_ids, puzzle_ids = create_sample_puzzle_data(
-        batch_size=2, seq_len=10, vocab_size=100, num_puzzle_ids=5
+        batch_size=3, seq_len=10, vocab_size=100, num_puzzle_ids=5
     )
 
     print("\n==> Return from create_sample_puzzle_data ...")
-    print(f"{input_ids.shape=}")
-    print(f"{puzzle_ids.shape=}")
 
     # Forward pass
     with torch.no_grad():
@@ -241,9 +239,9 @@ def main() -> None:
 
     # Run demonstrations
     demonstrate_system_differences()
-    # demonstrate_reasoning_history()
-    # demonstrate_adaptive_computation()
-    # demonstrate_parameter_efficiency()
+    demonstrate_reasoning_history()
+    demonstrate_adaptive_computation()
+    demonstrate_parameter_efficiency()
 
     print("\n" + "=" * 60)
     print("DEMONSTRATION COMPLETE")

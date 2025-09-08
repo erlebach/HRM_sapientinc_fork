@@ -1,3 +1,6 @@
+---
+alwaysApply: false
+---
 # Git Commit Automation Rule
 
 ## Purpose
@@ -63,7 +66,7 @@ Files modified:
 fix: correct HRM architecture - move projections and H processing outside T_cycles loop
 
 - H_to_L projection now computed once per segment (not T_cycles times)
-- H_module now processes once per segment (not T_cycles times) 
+- H_module now processes once per segment (not T_cycles times)
 - Aligns with standard HRM algorithm architecture
 - Significant computational efficiency improvement
 - Enhanced docstrings and type hints

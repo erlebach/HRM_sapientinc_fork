@@ -13,8 +13,8 @@ if ! git rev-parse --git-dir > /dev/null 2>&1; then
     exit 1
 fi
 
-# Check for changes
-if [ -z "$(git status --porcelain)" ]; then
+# Check for changes (only modified files, not untracked)
+if [ -z "$(git diff --name-only)" ] && [ -z "$(git diff --cached --name-only)" ]; then
     echo "ℹ️  No changes to commit"
     exit 0
 fi
@@ -23,8 +23,8 @@ echo "📝 Changes detected:"
 git status --short
 
 echo ""
-echo "📦 Staging all changes..."
-git add .
+echo "📦 Staging modified files..."
+git add -u  # Only stage modified files, not untracked files
 
 echo ""
 echo "🔍 Analyzing changes..."
