@@ -260,3 +260,4 @@ if __name__ == "__main__":
 
     elif args.mode == "demo":
         interactive_demo(args.checkpoint, args.device)
+

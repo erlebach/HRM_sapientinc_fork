@@ -19,6 +19,14 @@
 
 \maketitle
 
+\section{Notation Conventions}
+
+\textbf{Index Notation:} We use Einstein summation convention where repeated indices are summed over, except in Hadamard products where all indices must appear on both sides to avoid implicit summation.
+
+\textbf{Hadamard Product ($\odot$):} Element-wise multiplication between tensors of identical dimensions. In index notation, all indices appear on both sides (e.g., $A_{ij} \odot B_{ij}$).
+
+\textbf{Broadcasting:} When dimensions don't match for Hadamard product, we use broadcasting notation (e.g., $A_{ij} \alpha_i$ means $\alpha_i$ is repeated for each column $j$).
+
 \section{Overview}
 
 The System2Module implements Kahneman's System 2 thinking through a sophisticated transformer architecture with persistent working memory. The forward pass combines input injection, multi-layer processing with memory enhancement, and reasoning history maintenance.
@@ -79,35 +87,325 @@ where $\mathbf{M} \in \mathbb{R}^{M \times D}$ is the learnable memory buffer wi
 
 \textbf{Design Decision:} Memory retrieval uses attention weights rather than gating. This allows for soft, weighted combination of memory slots rather than binary selection. The addition operation assumes memory should be additive rather than replacing current information.
 
-\subsubsection{Memory Update Mechanism (Placeholder)}
+\subsubsection{Memory Retrieval Mechanisms}
 
-When $\text{update\_memory} = \text{True}$:
+The working memory supports three retrieval strategies, selected via the $\text{retrieval\_strategy}$ parameter:
+
+\paragraph{Strategy 1: Simple Retrieval}
+
+When $\text{retrieval\_strategy} = \text{"simple"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+
+\begin{enumerate}
+\item \textbf{Attention Computation:}
+\begin{align}
+\mathbf{A}_{\text{ret}} &= \mathbf{x} \mathbf{M}^T \in \mathbb{R}^{B \times S \times M} \\
+A_{\text{ret},bsi} &= \sum_{j=1}^{D} x_{bsj} M_{ij}
+\end{align}
+
+\item \textbf{Attention Weights:}
+\begin{align}
+\mathbf{W}_{\text{ret}} &= \text{softmax}(\mathbf{A}_{\text{ret}}, \text{dim}=-1) \in \mathbb{R}^{B \times S \times M} \\
+W_{\text{ret},bsi} &= \frac{\exp(A_{\text{ret},bsi})}{\sum_{i'=1}^{M} \exp(A_{\text{ret},bsi'})}
+\end{align}
+
+\item \textbf{Memory Retrieval:}
+\begin{align}
+\mathbf{R}_{\text{mem}} &= \mathbf{W}_{\text{ret}} \mathbf{M} \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= \sum_{i=1}^{M} W_{\text{ret},bsi} M_{ij}
+\end{align}
+
+\textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D \cdot M)$
+\begin{itemize}
+\item Attention computation: $O(B \cdot S \cdot D \cdot M)$
+\item Softmax computation: $O(B \cdot S \cdot M)$
+\item Memory retrieval: $O(B \cdot S \cdot M \cdot D)$
+\end{itemize}
+\end{enumerate}
+
+\paragraph{Strategy 2: Attention-Based Retrieval}
+
+When $\text{retrieval\_strategy} = \text{"attention"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+
+\begin{enumerate}
+\item \textbf{Multi-Head Attention:}
+\begin{align}
+\mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret}} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
+\text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{V}_v \\
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+W_{\text{ret},bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+\end{align}
+
+\item \textbf{RMS Normalization:}
+\begin{align}
+\mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}}) \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
+\end{align}
+where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
+
+\textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\begin{itemize}
+\item Attention computation: $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\item RMS normalization: $O(B \cdot S \cdot D)$
+\end{itemize}
+\end{enumerate}
+
+\paragraph{Strategy 3: Sophisticated Retrieval}
+
+When $\text{retrieval\_strategy} = \text{"sophisticated"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\boldsymbol{\alpha}_{\text{ret}} \in \mathbb{R}^{M}$: Learnable memory decay factors for retrieval
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
+\item $\mathbf{W}_{\text{imp}} \in \mathbb{R}^{D \times 1}$: Learnable importance projection matrix
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+
+\begin{enumerate}
+\item \textbf{Memory Decay for Retrieval:}
+\begin{align}
+\mathbf{M}_{\text{decayed}} &= \mathbf{M} \odot (\boldsymbol{\alpha}_{\text{ret}} \mathbf{1}^T) \in \mathbb{R}^{M \times D} \\
+M_{\text{decayed},ij} &= M_{ij} \alpha_{\text{ret},i} \quad \text{(broadcasting: $\alpha_{\text{ret},i}$ repeated for each column $j$)}
+\end{align}
+
+\item \textbf{Multi-Head Attention with Decayed Memory:}
+\begin{align}
+\mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret}} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
+\text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M}_{\text{decayed}} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M}_{\text{decayed}} \mathbf{W}_v \\
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+W_{\text{ret},bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+\end{align}
+
+\item \textbf{RMS Normalization:}
+\begin{align}
+\mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}}) \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
+\end{align}
+where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
+
+\item \textbf{Importance Weighting:}
+\begin{align}
+\mathbf{I}_{\text{weights}} &= \sigma(\mathbf{x} \mathbf{W}_{\text{imp}}) \in \mathbb{R}^{B \times S \times 1} \\
+I_{\text{weights},bs1} &= \sigma\left(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}\right) \\
+\mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights}} \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= R_{\text{mem},bsj} I_{\text{weights},bs1} \quad \text{(broadcasting: $I_{\text{weights},bs1}$ repeated for each column $j$)}
+\end{align}
+
+\textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\begin{itemize}
+\item Memory decay: $O(M \cdot D)$
+\item Attention computation: $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\item RMS normalization: $O(B \cdot S \cdot D)$
+\item Importance weighting: $O(B \cdot S \cdot D)$
+\end{itemize}
+\end{enumerate}
+
+\textbf{Design Decisions:} 
+\begin{itemize}
+\item \textbf{Strategy Selection:} Three levels of sophistication allow users to choose appropriate complexity for their task.
+\item \textbf{Memory Decay:} Sophisticated strategy includes separate decay factors for retrieval vs update.
+\item \textbf{Importance Weighting:} Sophisticated strategy weights retrieved memory based on current state importance.
+\item \textbf{Multi-Head Attention:} Attention and sophisticated strategies use multi-head attention for richer memory interactions.
+\item \textbf{RMS Normalization:} Used instead of LayerNorm for better efficiency and stability, following modern LLM practices (LLaMA, PaLM, etc.).
+\end{itemize}
+
+\subsubsection{Memory Update Mechanisms}
+
+The working memory supports three update strategies, selected via the $\text{update\_strategy}$ parameter:
+
+\paragraph{Strategy 1: Simple Update}
+
+When $\text{update\_strategy} = \text{"simple"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{D \times M}$: Learnable gate projection matrix
+\item $\mathbf{W}_{\text{update}} \in \mathbb{R}^{2D \times D}$: Learnable update projection matrix
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
 
 \begin{enumerate}
 \item \textbf{Representative Selection:}
-\begin{equation}
-\mathbf{r} = \mathbf{x}[:, 0, :] \in \mathbb{R}^{B \times D}
-\end{equation}
+\begin{align}
+\mathbf{r} &= \mathbf{x}[:, 0, :] \in \mathbb{R}^{B \times D} \\
+r_{bj} &= x_{b0j} \quad \text{(first token of each sequence)}
+\end{align}
 
 \item \textbf{Update Gate Computation:}
-\begin{equation}
-\mathbf{g} = \sigma(\mathbf{W}_{\text{gate}} \mathbf{r}) \in \mathbb{R}^{B \times M}
-\end{equation}
-where $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{M \times D}$ and $\sigma$ is the sigmoid function.
+\begin{align}
+\mathbf{g} &= \sigma(\mathbf{r} \mathbf{W}_{\text{gate}}) \in \mathbb{R}^{B \times M} \\
+g_{bi} &= \sigma\left(\sum_{j=1}^{D} r_{bj} W_{\text{gate},ji}\right) \quad \text{where } \sigma(x) = \frac{1}{1 + e^{-x}}
+\end{align}
 
 \item \textbf{Memory Update Preparation:}
-\begin{equation}
-\mathbf{u} = \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix} \in \mathbb{R}^{B \times D}
-\end{equation}
-where $\bar{\mathbf{m}} = \frac{1}{M}\sum_{i=1}^{M} \mathbf{M}[i, :] \in \mathbb{R}^{D}$ and $\mathbf{W}_{\text{update}} \in \mathbb{R}^{D \times 2D}$.
+\begin{align}
+\bar{\mathbf{m}} &= \frac{1}{M}\sum_{i=1}^{M} \mathbf{M}[i, :] \in \mathbb{R}^{D} \\
+\bar{m}_j &= \frac{1}{M}\sum_{i=1}^{M} M_{ij} \\
+\mathbf{u} &= \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix} \in \mathbb{R}^{B \times D} \\
+u_{bj} &= \sum_{k=1}^{2D} W_{\text{update},kj} \begin{bmatrix} r_{bk} \\ \bar{m}_k \end{bmatrix}
+\end{align}
 
-\item \textbf{Memory Update Application:}
-\begin{equation}
-\mathbf{M} \leftarrow \mathbf{M} \quad \text{(placeholder - no actual update)}
-\end{equation}
+\item \textbf{Vectorized Memory Update:}
+\begin{align}
+\bar{\mathbf{g}} &= \frac{1}{B}\sum_{b=1}^{B} \mathbf{g}[b, :] \in \mathbb{R}^{M} \\
+\bar{g}_i &= \frac{1}{B}\sum_{b=1}^{B} g_{bi} \\
+\bar{\mathbf{u}} &= \frac{1}{B}\sum_{b=1}^{B} \mathbf{u}[b, :] \in \mathbb{R}^{D} \\
+\bar{u}_j &= \frac{1}{B}\sum_{b=1}^{B} u_{bj} \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T) \\
+M_{ij} &\leftarrow (1 - \bar{g}_i) M_{ij} + \bar{g}_i \bar{u}_j \quad \text{(broadcasting: $\bar{g}_i$ and $\bar{u}_j$ create $M \times D$ matrices)}
+\end{align}
+
+\textbf{Asymptotic Complexity:} $O(B \cdot D \cdot M + B \cdot D^2)$
+\begin{itemize}
+\item Gate computation: $O(B \cdot D \cdot M)$
+\item Update preparation: $O(B \cdot D^2 + M \cdot D)$
+\item Memory update: $O(M \cdot D)$
+\end{itemize}
 \end{enumerate}
 
-\textbf{Design Decision:} The first token is used as representative rather than averaging all tokens. This choice prioritizes computational efficiency and follows transformer conventions where the first position often contains special tokens. The concatenation of representative and memory mean provides both current and historical context.
+\paragraph{Strategy 2: Attention-Based Update}
+
+When $\text{update\_strategy} = \text{"attention"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+
+\begin{enumerate}
+\item \textbf{Memory Attention:}
+\begin{align}
+\mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn}} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
+\text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
+A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+W_{\text{attn},bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+\end{align}
+
+\item \textbf{Update Signal:}
+\begin{align}
+\mathbf{s} &= \frac{1}{S}\sum_{s=1}^{S} \mathbf{A}_{\text{mem}}[:, s, :] \in \mathbb{R}^{B \times D} \\
+s_{bj} &= \frac{1}{S}\sum_{s=1}^{S} A_{\text{mem},bsj}
+\end{align}
+
+\item \textbf{Attention-Based Gates:}
+\begin{align}
+\mathbf{g}_{\text{attn}} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} \mathbf{W}_{\text{attn}}[:, s, :]\right) \in \mathbb{R}^{B \times M} \\
+g_{\text{attn},bi} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} W_{\text{attn},bsi}\right)
+\end{align}
+
+\item \textbf{Vectorized Memory Update:}
+\begin{align}
+\bar{\mathbf{g}}_{\text{attn}} &= \frac{1}{B}\sum_{b=1}^{B} \mathbf{g}_{\text{attn}}[b, :] \in \mathbb{R}^{M} \\
+\bar{g}_{\text{attn},i} &= \frac{1}{B}\sum_{b=1}^{B} g_{\text{attn},bi} \\
+\bar{\mathbf{s}} &= \frac{1}{B}\sum_{b=1}^{B} \mathbf{s}[b, :] \in \mathbb{R}^{D} \\
+\bar{s}_j &= \frac{1}{B}\sum_{b=1}^{B} s_{bj} \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T) \\
+M_{ij} &\leftarrow (1 - \bar{g}_{\text{attn},i}) M_{ij} + \bar{g}_{\text{attn},i} \bar{s}_j \quad \text{(broadcasting: $\bar{g}_{\text{attn},i}$ and $\bar{s}_j$ create $M \times D$ matrices)}
+\end{align}
+
+\textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\begin{itemize}
+\item Attention computation: $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
+\item Update signal: $O(B \cdot S \cdot D)$
+\item Memory update: $O(M \cdot D)$
+\end{itemize}
+\end{enumerate}
+
+\paragraph{Strategy 3: Sophisticated Update}
+
+When $\text{update\_strategy} = \text{"sophisticated"}$:
+
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\boldsymbol{\alpha} \in \mathbb{R}^{M}$: Learnable memory decay factors
+\item $\mathbf{W}_{\text{imp}} \in \mathbb{R}^{D \times 1}$: Learnable importance projection matrix
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
+\item $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{D \times M}$: Learnable gate projection matrix
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+
+\begin{enumerate}
+\item \textbf{Memory Decay:}
+\begin{align}
+\mathbf{M} &\leftarrow \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T) \\
+M_{ij} &\leftarrow M_{ij} \alpha_i \quad \text{(broadcasting: $\alpha_i$ repeated for each column $j$)}
+\end{align}
+where $\mathbf{1} \in \mathbb{R}^{D}$ is a vector of ones, making $\boldsymbol{\alpha} \mathbf{1}^T \in \mathbb{R}^{M \times D}$ for proper Hadamard product dimensions.
+
+\item \textbf{Importance-Weighted Representative:}
+\begin{align}
+\mathbf{w} &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \in \mathbb{R}^{B \times S} \\
+w_{bs} &= \frac{\exp(\sigma(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}))}{\sum_{s'=1}^{S} \exp(\sigma(\sum_{j=1}^{D} x_{bs'j} W_{\text{imp},j1}))} \\
+\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{w}[:, s] \odot \mathbf{x}[:, s, :] \in \mathbb{R}^{B \times D} \\
+r_{\text{imp},bj} &= \sum_{s=1}^{S} w_{bs} x_{bsj} \quad \text{(broadcasting: $w_{bs}$ repeated for each column $j$)}
+\end{align}
+
+\textbf{Role of $\mathbf{w}$ and $\mathbf{r}_{\text{imp}}$:}
+\begin{itemize}
+\item \textbf{$\mathbf{w}$ (importance weights):} Softmax-normalized attention weights that determine how much each sequence position contributes to the representative. Each row sums to 1, creating a probability distribution over sequence positions.
+\item \textbf{$\mathbf{r}_{\text{imp}}$ (importance-weighted representative):} A single representative vector per batch item that combines all sequence positions according to their learned importance. This replaces the simple "first token" approach with a learned, context-aware selection mechanism.
+\end{itemize}
+
+\item \textbf{Attention-Based Memory Interaction:}
+\begin{align}
+\mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph}} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times 1 \times D} \times \mathbb{R}^{B \times 1 \times M} \\
+\text{where: } \mathbf{Q} &= \mathbf{r}_{\text{imp}} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
+A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+W_{\text{soph},b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right)
+\end{align}
+
+\item \textbf{Adaptive Learning Rates:}
+\begin{align}
+\mathbf{g}_{\text{base}} &= \sigma(\mathbf{r}_{\text{imp}} \mathbf{W}_{\text{gate}}) \in \mathbb{R}^{B \times M} \\
+g_{\text{base},bi} &= \sigma\left(\sum_{j=1}^{D} r_{\text{imp},bj} W_{\text{gate},ji}\right) \\
+\mathbf{g}_{\text{final}} &= \mathbf{g}_{\text{base}} \odot \mathbf{W}_{\text{soph}}[:, 0, :] \in \mathbb{R}^{B \times M} \\
+g_{\text{final},bi} &= g_{\text{base},bi} W_{\text{soph},b0i} \quad \text{(true Hadamard product: all indices $b,i$ on both sides)} \\
+\boldsymbol{\lambda} &= \mathbf{g}_{\text{final}} \odot (\mathbf{1} (1 - \boldsymbol{\alpha})^T) \in \mathbb{R}^{B \times M} \\
+\lambda_{bi} &= g_{\text{final},bi} (1 - \alpha_i) \quad \text{(broadcasting: $\alpha_i$ repeated for each batch $b$)}
+\end{align}
+
+\item \textbf{Vectorized Sophisticated Update:}
+\begin{align}
+\bar{\boldsymbol{\lambda}} &= \frac{1}{B}\sum_{b=1}^{B} \boldsymbol{\lambda}[b, :] \in \mathbb{R}^{M} \\
+\bar{\lambda}_i &= \frac{1}{B}\sum_{b=1}^{B} \lambda_{bi} \\
+\bar{\mathbf{u}}_{\text{soph}} &= \frac{1}{B}\sum_{b=1}^{B} \mathbf{u}[b, :] \in \mathbb{R}^{D} \\
+\bar{u}_{\text{soph},j} &= \frac{1}{B}\sum_{b=1}^{B} u_{bj} \\
+\mathbf{M} &\leftarrow (1 - \bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}_{\text{soph}}^T) \\
+M_{ij} &\leftarrow (1 - \bar{\lambda}_i) M_{ij} + \bar{\lambda}_i \bar{u}_{\text{soph},j} \quad \text{(broadcasting: $\bar{\lambda}_i$ and $\bar{u}_{\text{soph},j}$ create $M \times D$ matrices)}
+\end{align}
+
+\textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D + B \cdot D^2 + B \cdot M \cdot D)$
+\begin{itemize}
+\item Importance computation: $O(B \cdot S \cdot D)$
+\item Attention computation: $O(B \cdot D^2 + B \cdot M \cdot D)$
+\item Gate computation: $O(B \cdot D \cdot M)$
+\item Memory update: $O(M \cdot D)$
+\end{itemize}
+\end{enumerate}
+
+\textbf{Design Decisions:} 
+\begin{itemize}
+\item \textbf{Strategy Selection:} Three levels of sophistication allow users to choose appropriate complexity for their task.
+\item \textbf{Vectorization:} All strategies use batch-averaged updates for computational efficiency.
+\item \textbf{Representative Selection:} Simple uses first token, sophisticated uses importance-weighted average.
+\item \textbf{Memory Decay:} Only sophisticated strategy includes forgetting mechanisms.
+\end{itemize}
 
 \subsubsection{Sophisticated Attention}
 
@@ -220,13 +518,13 @@ where $P_{\max}$ is the maximum history length.
 \section{Algorithm Summary}
 
 \begin{algorithm}
-\caption{System2Module Forward Pass}
+\caption{System2Module Forward Pass with Memory Update and Retrieval Strategies}
 \begin{algorithmic}[1]
-\STATE \textbf{Input:} $\mathbf{H} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{I} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{R} \in \mathbb{R}^{B \times P \times D}$
+\STATE \textbf{Input:} $\mathbf{H} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{I} \in \mathbb{R}^{B \times S \times D}$, $\mathbf{R} \in \mathbb{R}^{B \times P \times D}$, $\text{update\_strategy} \in \{\text{"simple"}, \text{"attention"}, \text{"sophisticated"}\}$, $\text{retrieval\_strategy} \in \{\text{"simple"}, \text{"attention"}, \text{"sophisticated"}\}$
 \STATE $\mathbf{H}^{(0)} \leftarrow \mathbf{H} + \mathbf{I}$
 \FOR{$l = 1$ to $L$}
     \STATE $\mathbf{x} \leftarrow \mathbf{H}^{(l-1)}$
-    \STATE $\mathbf{x}_{\text{enhanced}} \leftarrow \text{WorkingMemory}(\mathbf{x})$
+    \STATE $\mathbf{x}_{\text{enhanced}} \leftarrow \text{WorkingMemory}(\mathbf{x}, \text{update\_strategy}, \text{retrieval\_strategy})$
     \STATE $\mathbf{x}_{\text{attn}} \leftarrow \mathbf{x}_{\text{enhanced}} + \text{Attention}(\mathbf{x}_{\text{enhanced}}, \mathbf{R})$
     \STATE $\mathbf{x}_{\text{norm1}} \leftarrow \text{RMSNorm}(\mathbf{x}_{\text{attn}})$
     \STATE $\mathbf{x}_{\text{mlp}} \leftarrow \mathbf{x}_{\text{norm1}} + \text{SwiGLU}(\mathbf{x}_{\text{norm1}})$
@@ -236,6 +534,49 @@ where $P_{\max}$ is the maximum history length.
     \STATE $\mathbf{R} \leftarrow \text{UpdateHistory}(\mathbf{H}^{(L)})$
 \ENDIF
 \STATE \textbf{Return:} $\mathbf{H}^{(L)}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}
+\caption{WorkingMemory with Vectorized Updates and Retrieval}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} $\mathbf{x} \in \mathbb{R}^{B \times S \times D}$, $\text{update\_strategy}$, $\text{retrieval\_strategy}$, $\text{update\_memory} = \text{True}$
+\IF{$\text{retrieval\_strategy} = \text{"simple"}$}
+    \STATE $\mathbf{A} \leftarrow \mathbf{x} \mathbf{M}^T$ \COMMENT{Memory attention}
+    \STATE $\mathbf{W} \leftarrow \text{softmax}(\mathbf{A}, \text{dim}=-1)$ \COMMENT{Attention weights}
+    \STATE $\mathbf{R}_{\text{mem}} \leftarrow \mathbf{W} \mathbf{M}$ \COMMENT{Memory retrieval}
+\ELSIF{$\text{retrieval\_strategy} = \text{"attention"}$}
+    \STATE $\mathbf{R}_{\text{mem}}, \mathbf{W} \leftarrow \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M})$ \COMMENT{Multi-head attention retrieval}
+    \STATE $\mathbf{R}_{\text{mem}} \leftarrow \text{RMSNorm}(\mathbf{R}_{\text{mem}})$ \COMMENT{RMS normalization}
+\ELSIF{$\text{retrieval\_strategy} = \text{"sophisticated"}$}
+    \STATE $\mathbf{M}_{\text{decayed}} \leftarrow \mathbf{M} \odot (\boldsymbol{\alpha}_{\text{ret}} \mathbf{1}^T)$ \COMMENT{Memory decay for retrieval}
+    \STATE $\mathbf{R}_{\text{mem}}, \mathbf{W} \leftarrow \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}})$ \COMMENT{Multi-head attention with decayed memory}
+    \STATE $\mathbf{R}_{\text{mem}} \leftarrow \text{RMSNorm}(\mathbf{R}_{\text{mem}})$ \COMMENT{RMS normalization}
+    \STATE $\mathbf{I}_{\text{weights}} \leftarrow \sigma(\mathbf{x} \mathbf{W}_{\text{imp}})$ \COMMENT{Importance weights}
+    \STATE $\mathbf{R}_{\text{mem}} \leftarrow \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights}}$ \COMMENT{Importance weighting}
+\ENDIF
+\STATE $\mathbf{x}_{\text{enhanced}} \leftarrow \mathbf{x} + \mathbf{R}_{\text{mem}}$ \COMMENT{State enhancement}
+\IF{update\_memory}
+    \IF{update\_strategy = "simple"}
+        \STATE $\mathbf{r} \leftarrow \mathbf{x}[:, 0, :]$ \COMMENT{First token representative}
+        \STATE $\mathbf{g} \leftarrow \sigma(\mathbf{W}_{\text{gate}} \mathbf{r})$ \COMMENT{Update gates}
+        \STATE $\mathbf{u} \leftarrow \mathbf{W}_{\text{update}} [\mathbf{r}; \bar{\mathbf{m}}]$ \COMMENT{Update signal}
+        \STATE $\mathbf{M} \leftarrow (1 - \bar{\mathbf{g}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T)$ \COMMENT{Vectorized update}
+    \ELSIF{update\_strategy = "attention"}
+        \STATE $(\mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn}}) \leftarrow \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M})$
+        \STATE $\mathbf{s} \leftarrow \frac{1}{S}\sum_{s=1}^{S} \mathbf{A}_{\text{mem}}[:, s, :]$ \COMMENT{Update signal}
+        \STATE $\mathbf{g}_{\text{attn}} \leftarrow \sigma(\frac{1}{S}\sum_{s=1}^{S} \mathbf{W}_{\text{attn}}[:, s, :])$ \COMMENT{Attention gates}
+        \STATE $\mathbf{M} \leftarrow (1 - \bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T)$ \COMMENT{Vectorized update}
+    \ELSIF{update\_strategy = "sophisticated"}
+        \STATE $\mathbf{M} \leftarrow \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T)$ \COMMENT{Memory decay (row-wise scaling)}
+        \STATE $\mathbf{w} \leftarrow \text{softmax}(\sigma(\mathbf{W}_{\text{imp}} \mathbf{x}), \text{dim}=1)$ \COMMENT{Importance weights}
+        \STATE $\mathbf{r}_{\text{imp}} \leftarrow \sum_{s=1}^{S} \mathbf{w}[:, s] \odot \mathbf{x}[:, s, :]$ \COMMENT{Importance representative (broadcasting: $w_{bs}$ repeated for each column)}
+        \STATE $(\mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph}}) \leftarrow \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M})$
+        \STATE $\boldsymbol{\lambda} \leftarrow \sigma(\mathbf{W}_{\text{gate}} \mathbf{r}_{\text{imp}}) \odot \mathbf{W}_{\text{soph}}[:, 0, :] \odot (\mathbf{1} (1 - \boldsymbol{\alpha})^T)$ \COMMENT{Adaptive learning rates}
+        \STATE $\mathbf{M} \leftarrow (1 - \bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T)$ \COMMENT{Vectorized sophisticated update}
+    \ENDIF
+\ENDIF
+\STATE \textbf{Return:} $\mathbf{x}_{\text{enhanced}}$
 \end{algorithmic}
 \end{algorithm}
 
@@ -254,13 +595,314 @@ where $P_{\max}$ is the maximum history length.
 
 \subsection{Memory Architecture}
 
-The working memory mechanism implements a read-only memory system where:
+The working memory mechanism implements a dynamic memory system with three update strategies:
+
+\subsubsection{Strategy Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Feature} & \textbf{Simple} & \textbf{Attention} & \textbf{Sophisticated} \\
+\hline
+Representative Selection & First token & Attention-weighted & Importance-weighted \\
+Memory Decay & No & No & Yes \\
+Attention Mechanism & No & Yes & Yes \\
+Adaptive Learning Rates & No & No & Yes \\
+Computational Cost & Low & Medium & High \\
+Memory Change Magnitude & High & Medium & Low \\
+\hline
+\end{tabular}
+\caption{Comparison of memory update strategies}
+\end{table}
+
+\subsubsection{Vectorization Benefits}
+
+All strategies use vectorized operations for computational efficiency:
 \begin{itemize}
-\item Memory slots are learnable parameters that remain static during training
-\item Attention-based retrieval allows soft access to memory contents
-\item Update mechanism is computed but not applied (placeholder implementation)
+\item \textbf{Batch Averaging:} Update signals are averaged across batch dimension
+\item \textbf{Element-wise Operations:} Memory updates use broadcasting for efficiency
+\item \textbf{No Nested Loops:} Eliminated inefficient Python loops
+\item \textbf{GPU Acceleration:} Operations can run in parallel on GPU
 \end{itemize}
 
-This design provides a foundation for persistent memory while maintaining computational efficiency and gradient flow.
+\subsubsection{Retrieval Strategy Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Feature} & \textbf{Simple} & \textbf{Attention} & \textbf{Sophisticated} \\
+\hline
+Attention Mechanism & Basic & Multi-head & Multi-head \\
+Memory Decay & No & No & Yes \\
+Importance Weighting & No & No & Yes \\
+RMS Normalization & No & Yes & Yes \\
+Computational Cost & Low & Medium & High \\
+Retrieval Quality & Basic & Rich & Adaptive \\
+\hline
+\end{tabular}
+\caption{Comparison of memory retrieval strategies}
+\end{table}
+
+\subsubsection{Performance Characteristics}
+
+\begin{itemize}
+\item \textbf{Simple Strategy:} Fastest execution, largest memory changes, minimal parameters
+\item \textbf{Attention Strategy:} Balanced performance, uses entire sequence information
+\item \textbf{Sophisticated Strategy:} Most controlled updates, includes forgetting mechanisms
+\end{itemize}
+
+This design provides a flexible foundation for persistent memory with configurable sophistication levels while maintaining computational efficiency through vectorization.
+
+\section{Vectorization Improvements}
+
+\subsection{Problem with Original Implementation}
+
+The original memory update implementation used nested loops:
+\begin{verbatim}
+for b in range(batch_size):
+    for m in range(memory_size):
+        memory[m] = (1 - gate[b,m]) * memory[m] + gate[b,m] * update[b]
+\end{verbatim}
+
+This approach had several problems:
+\begin{itemize}
+\item \textbf{Poor Performance:} Loops are much slower than vectorized operations
+\item \textbf{No GPU Utilization:} Cannot take advantage of parallel processing
+\item \textbf{Memory Inefficient:} Multiple small operations instead of large vectorized ones
+\item \textbf{Not Scalable:} Performance degrades significantly with larger batch sizes
+\end{itemize}
+
+\subsection{Vectorized Solution}
+
+The improved implementation uses batch-averaged vectorized operations:
+
+\begin{equation}
+\mathbf{M} \leftarrow (1 - \bar{\mathbf{g}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T) \quad \text{(broadcasting creates proper Hadamard dimensions)}
+\end{equation}
+
+where $\bar{\mathbf{g}} = \frac{1}{B}\sum_{b=1}^{B} \mathbf{g}[b, :]$ and $\bar{\mathbf{u}} = \frac{1}{B}\sum_{b=1}^{B} \mathbf{u}[b, :]$.
+
+\subsection{Performance Results}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Configuration} & \textbf{Simple} & \textbf{Attention} & \textbf{Sophisticated} \\
+\hline
+Small (1×10×64) & 0.136 ms & 0.617 ms & 0.603 ms \\
+Medium (4×20×64) & 0.329 ms & 1.275 ms & 1.477 ms \\
+Large (8×50×128) & 0.534 ms & 3.481 ms & 2.999 ms \\
+XLarge (16×100×256) & 0.597 ms & 11.352 ms & 6.190 ms \\
+\hline
+\end{tabular}
+\caption{Memory update performance (milliseconds per update)}
+\end{table}
+
+\subsection{Key Benefits}
+
+\begin{itemize}
+\item \textbf{Linear Scaling:} Performance scales much better with batch size
+\item \textbf{GPU Acceleration:} Operations can run in parallel on GPU
+\item \textbf{Memory Efficiency:} Single large operations instead of many small ones
+\item \textbf{Code Quality:} Cleaner, more maintainable vectorized code
+\end{itemize}
+
+\appendix
+
+\section{MultiHeadAttention Two-Array Return}
+
+This appendix explains why the \texttt{nn.MultiheadAttention} function returns two arrays and how they are used in the memory update strategies.
+
+\subsection{MultiHeadAttention Output Structure}
+
+The \texttt{MultiHeadAttention} function returns two distinct outputs:
+
+\begin{equation}
+\mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn}} = \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M}
+\end{equation}
+
+\subsection{Output 1: Attention Output ($\mathbf{A}_{\text{mem}}$)}
+
+\textbf{Purpose:} Contains the memory-enhanced representation of the input.
+
+\textbf{Dimension:} $\mathbb{R}^{B \times S \times D}$
+
+\textbf{What it represents:} For each token in the input sequence $\mathbf{x}$, this contains a new representation that has integrated relevant information from memory $\mathbf{M}$.
+
+\textbf{Usage:} This is the primary output that gets used as the update signal in the next step of the memory update process.
+
+\subsection{Output 2: Attention Weights ($\mathbf{W}_{\text{attn}}$)}
+
+\textbf{Purpose:} Contains the attention scores showing how much each input token attends to each memory slot.
+
+\textbf{Dimension:} $\mathbb{R}^{B \times S \times M}$
+
+\textbf{What it represents:} For each batch item and sequence position, there's a vector of $M$ attention scores (one per memory slot).
+
+\textbf{Usage:} These weights are used to determine which memory slots to update and by how much.
+
+\subsection{Mathematical Breakdown}
+
+The \texttt{MultiHeadAttention(x, M, M)} operation works as follows:
+
+\begin{itemize}
+\item \textbf{Query:} $\mathbf{x}$ (current state) - "What am I looking for?"
+\item \textbf{Key:} $\mathbf{M}$ (memory buffer) - "What's available in memory?"
+\item \textbf{Value:} $\mathbf{M}$ (memory buffer) - "What information should I retrieve?"
+\end{itemize}
+
+\textbf{Attention Computation:}
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+\end{equation}
+
+Where:
+\begin{itemize}
+\item $Q = \mathbf{x}$ (queries)
+\item $K = \mathbf{M}$ (keys)
+\item $V = \mathbf{M}$ (values)
+\end{itemize}
+
+\subsection{Why Both Arrays Are Needed}
+
+\subsubsection{For Memory Enhancement:}
+\begin{itemize}
+\item $\mathbf{A}_{\text{mem}}$ provides the enhanced input representation
+\item This gets averaged across sequence length to create the update signal
+\end{itemize}
+
+\subsubsection{For Memory Update:}
+\begin{itemize}
+\item $\mathbf{W}_{\text{attn}}$ provides the attention weights
+\item These weights determine which memory slots were most relevant
+\item Used to compute update gates: $\mathbf{g}_{\text{attn}} = \sigma(\text{mean}(\mathbf{W}_{\text{attn}}))$
+\end{itemize}
+
+\subsection{Usage in Memory Update Strategies}
+
+\subsubsection{Attention-Based Strategy:}
+\begin{enumerate}
+\item \textbf{Step 1:} Compute attention between input and memory
+   \begin{equation}
+   \mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn}} = \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M})
+   \end{equation}
+
+\item \textbf{Step 2:} Use $\mathbf{A}_{\text{mem}}$ to create update signal
+   \begin{equation}
+   \mathbf{s} = \mathbf{A}_{\text{mem}}.\text{mean}(\text{dim}=1) \quad \text{(Average across sequence)}
+   \end{equation}
+
+\item \textbf{Step 3:} Use $\mathbf{W}_{\text{attn}}$ to create update gates
+   \begin{equation}
+   \mathbf{g}_{\text{attn}} = \sigma(\mathbf{W}_{\text{attn}}.\text{mean}(\text{dim}=1)) \quad \text{(Attention-based gates)}
+   \end{equation}
+
+\item \textbf{Step 4:} Apply vectorized update
+   \begin{equation}
+   \mathbf{M} \leftarrow (1 - \bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T) \quad \text{(broadcasting creates proper Hadamard dimensions)}
+   \end{equation}
+   where $\bar{\mathbf{g}}_{\text{attn}} = \frac{1}{B}\sum_{b=1}^{B} \mathbf{g}_{\text{attn}}[b, :]$ and $\bar{\mathbf{s}} = \frac{1}{B}\sum_{b=1}^{B} \mathbf{s}[b, :]$
+\end{enumerate}
+
+\subsubsection{Sophisticated Strategy:}
+The sophisticated strategy uses a similar pattern but with a single representative as the query:
+
+\begin{enumerate}
+\item \textbf{Step 1:} Compute attention between representative and memory
+   \begin{equation}
+   \mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph}} = \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M})
+   \end{equation}
+
+\item \textbf{Step 2:} Use both outputs for sophisticated memory updates with decay and importance weighting
+\end{enumerate}
+
+\subsection{Key Insight}
+
+The two outputs serve complementary roles:
+\begin{itemize}
+\item \textbf{$\mathbf{A}_{\text{mem}}$:} "What information was retrieved from memory?"
+\item \textbf{$\mathbf{W}_{\text{attn}}$:} "How much attention was paid to each memory slot?"
+\end{itemize}
+
+This dual output allows the attention-based strategy to both enhance the current state with memory information AND use the attention patterns to intelligently update the memory buffer itself.
+
+\section{Architectural Design vs. Learned Behavior}
+
+\subsection{The Gap Between Design Intent and Training Reality}
+
+A critical consideration in the design of memory update mechanisms is the distinction between \textbf{what the architecture enables} and \textbf{what the model actually learns}. While the simple memory update strategy is designed to enable context-dependent learning through the formulation:
+
+\begin{equation}
+\mathbf{u} = \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix}
+\end{equation}
+
+the actual behavior depends entirely on the learned weights $\mathbf{W}_{\text{update}} \in \mathbb{R}^{D \times 2D}$.
+
+\subsection{The Hot Stove Analogy}
+
+Consider the analogy of learning about fire safety through touching a hot stove:
+
+\textbf{Baby's Experience:}
+\begin{itemize}
+\item Limited existing knowledge about heat, pain, and safety
+\item Simple, direct association: ``hot stove → pain''
+\item Memory update: Basic safety rule formation
+\end{itemize}
+
+\textbf{Teenager's Experience:}
+\begin{itemize}
+\item Rich existing knowledge about chemistry, physics, and safety protocols
+\item Complex integration: ``hot stove → thermal energy transfer → cellular damage → pain response''
+\item Memory update: Sophisticated understanding of heat transfer mechanisms
+\end{itemize}
+
+Both receive the same sensory input (touching the hot stove), but their memory integration strategies differ dramatically based on their existing knowledge base $\bar{\mathbf{m}}$.
+
+\subsection{Theoretical vs. Practical Learning}
+
+\textbf{Theoretical Capability:}
+The architecture enables context-dependent updates through the concatenation $[\mathbf{r}, \bar{\mathbf{m}}]$, allowing the model to learn different integration strategies for different knowledge states.
+
+\textbf{Practical Reality:}
+The learned weights $\mathbf{W}_{\text{update}}$ are determined by:
+\begin{itemize}
+\item \textbf{Loss function design:} What behavior is rewarded during training
+\item \textbf{Training data distribution:} What patterns the model observes
+\item \textbf{Optimization success:} Whether the model finds optimal solutions
+\end{itemize}
+
+\subsection{Potential Learning Outcomes}
+
+The model might learn:
+\begin{itemize}
+\item $\mathbf{W}_{\text{update}} \approx [\mathbf{W}_r, \mathbf{0}]$: Ignores memory context entirely
+\item $\mathbf{W}_{\text{update}} \approx [\mathbf{0}, \mathbf{W}_m]$: Ignores new information entirely
+\item $\mathbf{W}_{\text{update}} \approx [\mathbf{W}_r, \mathbf{W}_m]$: Uses both components (intended behavior)
+\end{itemize}
+
+\subsection{Empirical Validation Requirements}
+
+To verify that context-dependent learning actually occurs, empirical analysis must examine:
+\begin{enumerate}
+\item \textbf{Weight analysis:} Whether $\mathbf{W}_{\text{update}}$ utilizes both input components
+\item \textbf{Behavioral testing:} Whether updates vary with memory state
+\item \textbf{Performance comparison:} Whether context-dependent updates improve task performance
+\item \textbf{Ablation studies:} Whether removing memory context degrades performance
+\end{enumerate}
+
+\subsection{Design Implications}
+
+This analysis highlights the importance of:
+\begin{itemize}
+\item \textbf{Careful loss function design} to encourage context-dependent behavior
+\item \textbf{Diverse training data} that demonstrates context-dependent patterns
+\item \textbf{Empirical validation} to verify that intended behaviors emerge
+\item \textbf{Architectural constraints} that make desired behaviors more likely to be learned
+\end{itemize}
+
+The memory update mechanism provides the \textit{possibility} of sophisticated, context-dependent learning, but successful training is required to realize this potential.
 
 \end{document}

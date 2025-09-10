@@ -16,7 +16,9 @@
 - **Hidden Size**: 512 (coarse-grained processing)
 - **Purpose**: Deliberate, analytical processing with working memory
 - **Features**: Working memory buffer, reasoning history, advanced attention
-- **Parameters**: ~5.9M parameters
+- **Memory Update Strategies**: 3 levels (simple, attention, sophisticated)
+- **Memory Retrieval Strategies**: 3 levels (simple, attention, sophisticated)
+- **Parameters**: ~5.9M-7.9M parameters (varies by memory strategy combination)
 
 ### Main Model
 - **Class**: `AsymmetricHRMModel`
@@ -31,7 +33,7 @@
 
 ### Core Capabilities
 - ✅ Asymmetric processing (different complexities per system)
-- ✅ Working memory in System 2
+- ✅ Working memory in System 2 with 3 update strategies
 - ✅ Adaptive computation with Q-learning
 - ✅ Hierarchical reasoning (L processes input + H state, H processes L state + input)
 - ✅ Standard HRM notation (L_blocks, H_blocks, T_cycles, M_segments)
@@ -39,6 +41,8 @@
 - ✅ Fine-to-coarse processing pipeline (CNN-inspired)
 - ✅ Conditional projection layers (only when dimensions differ)
 - ✅ Symmetric model support (equal dimensions, no projections)
+- ✅ Memory update strategies: simple, attention-based, sophisticated
+- ✅ Memory retrieval strategies: simple, attention-based, sophisticated
 
 ### Training & Evaluation
 - ✅ Complete training pipeline (`train.py`)
@@ -83,6 +87,7 @@ HRM_asymmetric/
 - ✅ Added symmetric model convenience function
 - ✅ **FIXED: H_to_L projection efficiency bug** - moved projection outside T_cycles loop
 - ✅ **FIXED: H processing architecture bug** - H now processes once per segment (not T_cycles times)
+- ✅ **NEW: Memory Update Strategies** - 3 levels of memory update sophistication
 
 ### Current Status
 - **Development**: Complete and ready for production use
@@ -101,6 +106,7 @@ HRM_asymmetric/
 - **T_cycles**: 2 (Cycles per segment)
 - **M_segments**: 16 (Maximum segments)
 - **H_memory_size**: 64 (Working memory size)
+- **Memory Update Strategy**: simple/attention/sophisticated (configurable)
 
 ### Usage Examples
 
@@ -110,7 +116,8 @@ from HRM_asymmetric import create_asymmetric_hrm_model
 
 model = create_asymmetric_hrm_model(
     L_hidden_size=768, H_hidden_size=512,
-    L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16
+    L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16,
+    H_memory_update_strategy="sophisticated"  # Choose memory strategy
 )
 outputs = model(input_ids, puzzle_ids)
 ```
@@ -121,10 +128,16 @@ from HRM_asymmetric import create_symmetric_hrm_model
 
 model = create_symmetric_hrm_model(
     hidden_size=512,  # Both systems use same dimension
-    L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16
+    L_blocks=1, H_blocks=4, T_cycles=2, M_segments=16,
+    H_memory_update_strategy="attention"  # Choose memory strategy
 )
 outputs = model(input_ids, puzzle_ids)
 ```
+
+**Memory Update Strategies:**
+- **"simple"**: Basic gated update using first token (fastest)
+- **"attention"**: Attention-based update mechanism (balanced)
+- **"sophisticated"**: Advanced update with decay and importance weighting (most capable)
 
 ### Training Command
 ```bash

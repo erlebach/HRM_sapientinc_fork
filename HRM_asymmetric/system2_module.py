@@ -10,6 +10,7 @@ This module implements Kahneman's System 2 thinking:
 """
 
 import math
+import time
 from typing import Optional, Tuple
 
 import torch
@@ -27,6 +28,36 @@ def rms_norm(
     """Root Mean Square normalization without learnable parameters."""
     variance = x.square().mean(-1, keepdim=True)
     return x * torch.rsqrt(variance + eps)
+
+
+@beartype
+class RMSNorm(nn.Module):
+    """Root Mean Square normalization with learnable scale parameter.
+
+    This is the normalization used in modern LLMs like LLaMA, PaLM, etc.
+    It's more efficient than LayerNorm as it doesn't compute mean.
+    """
+
+    def __init__(self, hidden_size: int, eps: float = 1e-5):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+
+    def forward(
+        self, x: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
+        """Apply RMS normalization.
+
+        Args:
+            x: Input tensor [batch, seq, hidden]
+
+        Returns:
+            Normalized tensor [batch, seq, hidden]
+        """
+        variance = x.square().mean(-1, keepdim=True)
+        x = x * torch.rsqrt(variance + self.eps)
+        return self.weight * x
 
 
 @beartype
@@ -78,10 +109,28 @@ class WorkingMemory(nn.Module):
     that can be attended to during current processing.
     """
 
-    def __init__(self, hidden_size: int, memory_size: int):
+    def __init__(
+        self,
+        hidden_size: int,
+        memory_size: int,
+        update_strategy: str = "simple",
+        retrieval_strategy: str = "simple",
+    ):
         super().__init__()
         self.hidden_size = hidden_size
         self.memory_size = memory_size
+        self.update_strategy = update_strategy
+        self.retrieval_strategy = retrieval_strategy
+
+        # Timing statistics
+        self.timing_stats = {
+            "retrieval_times": [],
+            "update_times": [],
+            "total_retrieval_time": 0.0,
+            "total_update_time": 0.0,
+            "retrieval_count": 0,
+            "update_count": 0,
+        }
 
         # Memory buffer (learnable parameters)
         self.memory = nn.Parameter(torch.randn(memory_size, hidden_size))
@@ -89,6 +138,28 @@ class WorkingMemory(nn.Module):
         # Memory update mechanisms
         self.memory_update = nn.Linear(hidden_size * 2, hidden_size, bias=False)
         self.memory_gate = nn.Linear(hidden_size, memory_size, bias=False)
+
+        # Additional parameters for sophisticated updates
+        if update_strategy in ["attention", "sophisticated"]:
+            self.memory_attention = nn.MultiheadAttention(
+                hidden_size, num_heads=4, batch_first=True
+            )
+            self.memory_norm = RMSNorm(hidden_size)
+
+        if update_strategy == "sophisticated":
+            self.memory_decay = nn.Parameter(torch.ones(memory_size) * 0.95)
+            self.memory_importance = nn.Linear(hidden_size, 1, bias=False)
+
+        # Additional parameters for sophisticated retrieval
+        if retrieval_strategy in ["attention", "sophisticated"]:
+            self.retrieval_attention = nn.MultiheadAttention(
+                hidden_size, num_heads=4, batch_first=True
+            )
+            self.retrieval_norm = RMSNorm(hidden_size)
+
+        if retrieval_strategy == "sophisticated":
+            self.retrieval_decay = nn.Parameter(torch.ones(memory_size) * 0.95)
+            self.retrieval_importance = nn.Linear(hidden_size, 1, bias=False)
 
     def forward(
         self,
@@ -106,6 +177,211 @@ class WorkingMemory(nn.Module):
         """
         batch_size, seq_len, _ = current_state.shape
 
+        # Retrieve memory using selected strategy
+        if self.retrieval_strategy == "simple":
+            memory_retrieved = self._retrieve_memory_simple(current_state)
+        elif self.retrieval_strategy == "attention":
+            memory_retrieved = self._retrieve_memory_attention(current_state)
+        elif self.retrieval_strategy == "sophisticated":
+            memory_retrieved = self._retrieve_memory_sophisticated(current_state)
+        else:
+            raise ValueError(f"Unknown retrieval strategy: {self.retrieval_strategy}")
+
+        # Combine current state with retrieved memory
+        memory_enhanced = current_state + memory_retrieved
+
+        if update_memory:
+            if self.update_strategy == "simple":
+                self._update_memory_simple(current_state)
+            elif self.update_strategy == "attention":
+                self._update_memory_attention(current_state)
+            elif self.update_strategy == "sophisticated":
+                self._update_memory_sophisticated(current_state)
+
+        return memory_enhanced
+
+    def _update_memory_simple(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> None:
+        """Update (simple) memory using first token as representative.
+
+        Updates memory slots using gated combination of representative
+        and current memory state.
+        """
+        start_time = time.perf_counter()
+
+        batch_size = current_state.shape[0]
+
+        # Use first token as representative
+        representative = current_state[:, 0]  # [batch, hidden]
+
+        # Compute update gate for each memory slot
+        update_gate = torch.sigmoid(
+            self.memory_gate(representative)
+        )  # [batch, memory_size]
+
+        # Prepare memory update
+        memory_mean = self.memory.mean(0).unsqueeze(0).expand(batch_size, -1)
+        memory_update = self.memory_update(
+            torch.cat([representative, memory_mean], dim=-1)
+        )  # [batch, hidden]
+
+        # Apply gated update to memory (vectorized)
+        with torch.no_grad():
+            # Vectorized update: [memory_size, hidden] = [memory_size, hidden] * [batch, memory_size, 1] + [batch, hidden] * [batch, memory_size, 1]
+            # We need to average across batch dimension for each memory slot
+            memory_weights = update_gate.mean(dim=0, keepdim=True).T  # [memory_size, 1]
+            memory_update_avg = memory_update.mean(dim=0, keepdim=True)  # [1, hidden]
+
+            self.memory.data = (
+                1 - memory_weights
+            ) * self.memory.data + memory_weights * memory_update_avg
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        # Update timing statistics
+        self.timing_stats["update_times"].append(elapsed_time)
+        self.timing_stats["total_update_time"] += elapsed_time
+        self.timing_stats["update_count"] += 1
+
+    def _update_memory_attention(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> None:
+        """Update attention-based memory.
+
+        Uses attention mechanism to determine which memory slots to update
+        and how much to update them.
+        """
+        start_time = time.perf_counter()
+
+        batch_size, seq_len, _ = current_state.shape
+
+        # Reshape memory for attention
+        memory_expanded = self.memory.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Compute attention between current state and memory
+        attn_output, attn_weights = self.memory_attention(
+            current_state, memory_expanded, memory_expanded
+        )  # [batch, seq, hidden], [batch, seq, memory_size]
+
+        # Use attention-weighted average as update signal
+        update_signal = attn_output.mean(dim=1)  # [batch, hidden]
+
+        # Compute update gates based on attention weights
+        attention_importance = attn_weights.mean(dim=1)  # [batch, memory_size]
+        update_gates = torch.sigmoid(attention_importance)
+
+        # Apply updates (vectorized)
+        with torch.no_grad():
+            # Vectorized update: average across batch dimension
+            memory_weights = update_gates.mean(
+                dim=0, keepdim=True
+            ).T  # [memory_size, 1]
+            update_signal_avg = update_signal.mean(dim=0, keepdim=True)  # [1, hidden]
+
+            self.memory.data = (
+                1 - memory_weights
+            ) * self.memory.data + memory_weights * update_signal_avg
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        # Update timing statistics
+        self.timing_stats["update_times"].append(elapsed_time)
+        self.timing_stats["total_update_time"] += elapsed_time
+        self.timing_stats["update_count"] += 1
+
+    def _update_memory_sophisticated(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> None:
+        """Update (sophisticated) memory with decay and importance weighting.
+
+        Features:
+        - Memory decay over time
+        - Importance-based slot selection
+        - Attention-based update mechanism
+        - Adaptive learning rates per slot
+        """
+        start_time = time.perf_counter()
+
+        batch_size, seq_len, _ = current_state.shape
+
+        # Apply memory decay first
+        with torch.no_grad():
+            self.memory.data *= self.memory_decay.unsqueeze(1)
+
+        # Compute importance scores for current state
+        importance_scores = torch.sigmoid(
+            self.memory_importance(current_state)
+        )  # [batch, seq, 1]
+
+        # Weighted representative (importance-weighted average)
+        weights = F.softmax(importance_scores.squeeze(-1), dim=1)  # [batch, seq]
+        representative = torch.sum(
+            current_state * weights.unsqueeze(-1), dim=1
+        )  # [batch, hidden]
+
+        # Attention-based memory interaction
+        memory_expanded = self.memory.unsqueeze(0).expand(batch_size, -1, -1)
+        representative_expanded = representative.unsqueeze(1)  # [batch, 1, hidden]
+
+        attn_output, attn_weights = self.memory_attention(
+            representative_expanded, memory_expanded, memory_expanded
+        )  # [batch, 1, hidden], [batch, 1, memory_size]
+
+        # Compute update gates with memory-specific learning rates
+        base_gates = torch.sigmoid(
+            self.memory_gate(representative)
+        )  # [batch, memory_size]
+
+        attention_modulation = attn_weights.squeeze(1)  # [batch, memory_size]
+        update_gates = base_gates * attention_modulation
+
+        # Prepare memory update with residual connection
+        memory_mean = self.memory.mean(0).unsqueeze(0).expand(batch_size, -1)
+        memory_update = self.memory_update(
+            torch.cat([representative, memory_mean], dim=-1)
+        )  # [batch, hidden]
+
+        # Apply sophisticated updates (vectorized)
+        with torch.no_grad():
+            # Vectorized update: average across batch dimension
+            memory_weights = update_gates.mean(dim=0)  # [memory_size]
+            memory_update_avg = memory_update.mean(dim=0)  # [hidden]
+
+            # Adaptive learning rate based on memory decay
+            adaptive_lr = memory_weights * (1 - self.memory_decay)  # [memory_size]
+
+            # Vectorized update: [memory_size, hidden] = (1 - adaptive_lr) * memory + adaptive_lr * update
+            adaptive_lr_expanded = adaptive_lr.unsqueeze(1)  # [memory_size, 1]
+            memory_update_expanded = memory_update_avg.unsqueeze(0)  # [1, hidden]
+
+            self.memory.data = (
+                1 - adaptive_lr_expanded
+            ) * self.memory.data + adaptive_lr_expanded * memory_update_expanded
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        # Update timing statistics
+        self.timing_stats["update_times"].append(elapsed_time)
+        self.timing_stats["total_update_time"] += elapsed_time
+        self.timing_stats["update_count"] += 1
+
+    def _retrieve_memory_simple(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
+        """Simple attention-based memory retrieval.
+
+        Args:
+            current_state: Current reasoning state [batch, seq, hidden]
+
+        Returns:
+            Retrieved memory [batch, seq, hidden]
+        """
+        start_time = time.perf_counter()
+
         # Compute attention to memory
         memory_attn = torch.matmul(
             current_state, self.memory.T
@@ -117,37 +393,148 @@ class WorkingMemory(nn.Module):
             memory_weights, self.memory
         )  # [batch, seq, hidden]
 
-        # Combine current state with retrieved memory
-        memory_enhanced = current_state + memory_retrieved
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
 
-        if update_memory:
-            # Update memory buffer based on current state
-            # Use first token as representative for memory update
-            representative = current_state[:, 0]  # [batch, hidden]
+        # Update timing statistics
+        self.timing_stats["retrieval_times"].append(elapsed_time)
+        self.timing_stats["total_retrieval_time"] += elapsed_time
+        self.timing_stats["retrieval_count"] += 1
 
-            # Compute memory update gate
-            update_gate = torch.sigmoid(
-                self.memory_gate(representative)
-            )  # [batch, memory_size]
+        return memory_retrieved
 
-            # Update memory (simplified - could be more sophisticated)
-            memory_update = self.memory_update(
-                torch.cat(
-                    [
-                        representative,
-                        self.memory.mean(0).unsqueeze(0).expand(batch_size, -1),
-                    ],
-                    dim=-1,
-                )
-            )  # [batch, hidden]
+    def _retrieve_memory_attention(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
+        """Multi-head attention-based memory retrieval.
 
-            # Apply update to memory (this is a simplified version)
-            # In practice, you might want more sophisticated memory management
-            with torch.no_grad():
-                # This is a placeholder - real memory update would be more complex
-                pass
+        Args:
+            current_state: Current reasoning state [batch, seq, hidden]
 
-        return memory_enhanced
+        Returns:
+            Retrieved memory [batch, seq, hidden]
+        """
+        start_time = time.perf_counter()
+
+        batch_size = current_state.shape[0]
+
+        # Expand memory for batch processing
+        memory_expanded = self.memory.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Multi-head attention between current state and memory
+        memory_retrieved, _ = self.retrieval_attention(
+            current_state, memory_expanded, memory_expanded
+        )  # [batch, seq, hidden]
+
+        # Apply RMS normalization
+        memory_retrieved = self.retrieval_norm(memory_retrieved)
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        # Update timing statistics
+        self.timing_stats["retrieval_times"].append(elapsed_time)
+        self.timing_stats["total_retrieval_time"] += elapsed_time
+        self.timing_stats["retrieval_count"] += 1
+
+        return memory_retrieved
+
+    def _retrieve_memory_sophisticated(
+        self, current_state: Float[Tensor, "batch seq hidden"]
+    ) -> Float[Tensor, "batch seq hidden"]:
+        """Sophisticated memory retrieval with decay and importance weighting.
+
+        Args:
+            current_state: Current reasoning state [batch, seq, hidden]
+
+        Returns:
+            Retrieved memory [batch, seq, hidden]
+        """
+        start_time = time.perf_counter()
+
+        batch_size = current_state.shape[0]
+
+        # Apply memory decay for retrieval
+        decayed_memory = self.memory * self.retrieval_decay.unsqueeze(1)
+
+        # Expand decayed memory for batch processing
+        memory_expanded = decayed_memory.unsqueeze(0).expand(batch_size, -1, -1)
+
+        # Multi-head attention between current state and decayed memory
+        memory_retrieved, _ = self.retrieval_attention(
+            current_state, memory_expanded, memory_expanded
+        )  # [batch, seq, hidden]
+
+        # Apply RMS normalization
+        memory_retrieved = self.retrieval_norm(memory_retrieved)
+
+        # Apply importance weighting
+        importance_weights = torch.sigmoid(
+            self.retrieval_importance(current_state)
+        )  # [batch, seq, 1]
+        memory_retrieved = memory_retrieved * importance_weights
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        # Update timing statistics
+        self.timing_stats["retrieval_times"].append(elapsed_time)
+        self.timing_stats["total_retrieval_time"] += elapsed_time
+        self.timing_stats["retrieval_count"] += 1
+
+        return memory_retrieved
+
+    def get_timing_stats(self) -> dict:
+        """Get timing statistics for memory operations.
+
+        Returns:
+            Dictionary containing timing statistics
+        """
+        stats = self.timing_stats.copy()
+
+        # Calculate averages
+        if stats["retrieval_count"] > 0:
+            stats["avg_retrieval_time"] = (
+                stats["total_retrieval_time"] / stats["retrieval_count"]
+            )
+        else:
+            stats["avg_retrieval_time"] = 0.0
+
+        if stats["update_count"] > 0:
+            stats["avg_update_time"] = (
+                stats["total_update_time"] / stats["update_count"]
+            )
+        else:
+            stats["avg_update_time"] = 0.0
+
+        # Calculate min/max for retrieval times
+        if stats["retrieval_times"]:
+            stats["min_retrieval_time"] = min(stats["retrieval_times"])
+            stats["max_retrieval_time"] = max(stats["retrieval_times"])
+        else:
+            stats["min_retrieval_time"] = 0.0
+            stats["max_retrieval_time"] = 0.0
+
+        # Calculate min/max for update times
+        if stats["update_times"]:
+            stats["min_update_time"] = min(stats["update_times"])
+            stats["max_update_time"] = max(stats["update_times"])
+        else:
+            stats["min_update_time"] = 0.0
+            stats["max_update_time"] = 0.0
+
+        return stats
+
+    def reset_timing_stats(self) -> None:
+        """Reset timing statistics."""
+        self.timing_stats = {
+            "retrieval_times": [],
+            "update_times": [],
+            "total_retrieval_time": 0.0,
+            "total_update_time": 0.0,
+            "retrieval_count": 0,
+            "update_count": 0,
+        }
 
 
 @beartype
@@ -258,11 +645,15 @@ class System2Block(nn.Module):
         intermediate_size: int,
         max_seq_len: int,
         memory_size: int = 64,
+        memory_update_strategy: str = "simple",
+        memory_retrieval_strategy: str = "simple",
     ):
         super().__init__()
         self.attention = SophisticatedAttention(hidden_size, num_heads, max_seq_len)
         self.mlp = SwiGLU(hidden_size, intermediate_size)
-        self.working_memory = WorkingMemory(hidden_size, memory_size)
+        self.working_memory = WorkingMemory(
+            hidden_size, memory_size, memory_update_strategy, memory_retrieval_strategy
+        )
 
     def forward(
         self,
@@ -313,11 +704,15 @@ class System2Module(nn.Module):
         num_layers: int,
         max_seq_len: int,
         memory_size: int = 64,
+        memory_update_strategy: str = "simple",
+        memory_retrieval_strategy: str = "simple",
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.memory_size = memory_size
+        self.memory_update_strategy = memory_update_strategy
+        self.memory_retrieval_strategy = memory_retrieval_strategy
 
         # More layers for System 2 (depth over speed)
         effective_layers = max(2, num_layers)
@@ -325,7 +720,13 @@ class System2Module(nn.Module):
         self.layers = nn.ModuleList(
             [
                 System2Block(
-                    hidden_size, num_heads, intermediate_size, max_seq_len, memory_size
+                    hidden_size,
+                    num_heads,
+                    intermediate_size,
+                    max_seq_len,
+                    memory_size,
+                    memory_update_strategy,
+                    memory_retrieval_strategy,
                 )
                 for _ in range(effective_layers)
             ]
@@ -387,32 +788,92 @@ class System2Module(nn.Module):
 
 
 if __name__ == "__main__":
-    # Test System2Module
+    # Test System2Module with different memory update and retrieval strategies
     batch_size, seq_len, hidden_size = 2, 10, 512
     num_heads, intermediate_size, max_seq_len = 8, 2048, 128
     num_layers = 4
     memory_size = 64
 
-    model = System2Module(
-        hidden_size=hidden_size,
-        num_heads=num_heads,
-        intermediate_size=intermediate_size,
-        num_layers=num_layers,
-        max_seq_len=max_seq_len,
-        memory_size=memory_size,
-    )
+    # Test all combinations of memory update and retrieval strategies
+    update_strategies = ["simple", "attention", "sophisticated"]
+    retrieval_strategies = ["simple", "attention", "sophisticated"]
 
-    # Create dummy inputs
-    hidden_states = torch.randn(batch_size, seq_len, hidden_size)
-    input_injection = torch.randn(batch_size, seq_len, hidden_size)
+    for update_strategy in update_strategies:
+        for retrieval_strategy in retrieval_strategies:
+            print(
+                f"\n=== Testing {update_strategy.upper()} update + {retrieval_strategy.upper()} retrieval ==="
+            )
 
-    # Forward pass
-    output = model(hidden_states, input_injection)
+            model = System2Module(
+                hidden_size=hidden_size,
+                num_heads=num_heads,
+                intermediate_size=intermediate_size,
+                num_layers=num_layers,
+                max_seq_len=max_seq_len,
+                memory_size=memory_size,
+                memory_update_strategy=update_strategy,
+                memory_retrieval_strategy=retrieval_strategy,
+            )
 
-    print("System2Module created successfully!")
-    print(f"Input shape: {hidden_states.shape}")
-    print(f"Output shape: {output.shape}")
-    print(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"Effective layers: {len(model.layers)}")
-    print(f"Memory size: {model.memory_size}")
-    print(f"Has reasoning history: {model.reasoning_history is not None}")
+            # Create dummy inputs
+            hidden_states = torch.randn(batch_size, seq_len, hidden_size)
+            input_injection = torch.randn(batch_size, seq_len, hidden_size)
+
+            # Store initial memory state
+            initial_memory = model.layers[0].working_memory.memory.clone()
+
+            # Forward pass
+            output = model(hidden_states, input_injection)
+
+            # Check if memory was updated
+            final_memory = model.layers[0].working_memory.memory
+            memory_changed = not torch.allclose(initial_memory, final_memory)
+
+            print(f"Update strategy: {update_strategy}")
+            print(f"Retrieval strategy: {retrieval_strategy}")
+            print(f"Input shape: {hidden_states.shape}")
+            print(f"Output shape: {output.shape}")
+            print(
+                f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}"
+            )
+            print(f"Effective layers: {len(model.layers)}")
+            print(f"Memory size: {model.memory_size}")
+            print(f"Memory updated: {memory_changed}")
+            print(
+                f"Memory change magnitude: {torch.norm(final_memory - initial_memory).item():.6f}"
+            )
+
+            # Test memory retrieval mechanism directly
+            working_memory = model.layers[0].working_memory
+            test_state = torch.randn(1, 5, hidden_size)
+
+            print(f"Testing {retrieval_strategy} retrieval mechanism:")
+            if retrieval_strategy == "simple":
+                retrieved = working_memory._retrieve_memory_simple(test_state)
+            elif retrieval_strategy == "attention":
+                retrieved = working_memory._retrieve_memory_attention(test_state)
+            else:  # sophisticated
+                retrieved = working_memory._retrieve_memory_sophisticated(test_state)
+
+            print(f"  Retrieved shape: {retrieved.shape}")
+            print(f"  Retrieved magnitude: {torch.norm(retrieved).item():.6f}")
+            print(f"  Retrieval successful: {retrieved.shape == test_state.shape}")
+
+            # Display timing statistics
+            timing_stats = working_memory.get_timing_stats()
+            print(f"\n  === TIMING STATISTICS ===")
+            print(f"  Retrieval Operations:")
+            print(f"    Count: {timing_stats['retrieval_count']}")
+            print(f"    Total time: {timing_stats['total_retrieval_time']:.6f}s")
+            print(f"    Average time: {timing_stats['avg_retrieval_time']:.6f}s")
+            print(f"    Min time: {timing_stats['min_retrieval_time']:.6f}s")
+            print(f"    Max time: {timing_stats['max_retrieval_time']:.6f}s")
+            print(f"  Update Operations:")
+            print(f"    Count: {timing_stats['update_count']}")
+            print(f"    Total time: {timing_stats['total_update_time']:.6f}s")
+            print(f"    Average time: {timing_stats['avg_update_time']:.6f}s")
+            print(f"    Min time: {timing_stats['min_update_time']:.6f}s")
+            print(f"    Max time: {timing_stats['max_update_time']:.6f}s")
+            print(
+                f"  Total Memory Operations Time: {timing_stats['total_retrieval_time'] + timing_stats['total_update_time']:.6f}s"
+            )

@@ -1,5 +1,66 @@
 # HRM Asymmetric Development Journal
 
+## 2025-01-XX - Memory Retrieval Strategies Implementation
+
+### Completed Tasks ✅
+
+1. **Implemented Three Memory Retrieval Strategies**
+   - **Simple Retrieval**: Basic attention-based memory retrieval using `softmax(xM^T) @ M`
+   - **Attention-Based Retrieval**: Multi-head attention between current state and memory
+   - **Sophisticated Retrieval**: Includes memory decay, importance weighting, and layer normalization
+
+2. **Updated WorkingMemory Class**
+   - Added `retrieval_strategy` parameter to constructor
+   - Implemented `_retrieve_memory_simple()`, `_retrieve_memory_attention()`, `_retrieve_memory_sophisticated()` methods
+   - Added retrieval-specific parameters: `retrieval_attention`, `retrieval_norm`, `retrieval_decay`, `retrieval_importance`
+
+3. **Updated System2Module and System2Block**
+   - Added `memory_retrieval_strategy` parameter to both classes
+   - Updated constructor calls to pass retrieval strategy to WorkingMemory
+   - Maintained backward compatibility with default "simple" strategy
+
+4. **Enhanced Testing Framework**
+   - Updated test suite to test all 9 combinations of update and retrieval strategies
+   - Added direct testing of retrieval mechanisms
+   - Verified parameter counts and memory change magnitudes for each combination
+
+5. **Updated LaTeX Documentation**
+   - Added comprehensive "Memory Retrieval Mechanisms" section
+   - Included parameter definitions, mathematical formulations, and complexity analysis
+   - Added index notation alongside matrix notation following latex.mdc rules
+   - Updated algorithm descriptions to include retrieval strategies
+   - Added retrieval strategy comparison table
+
+### Files Created/Modified
+- `system2_module.py` - Added retrieval strategies and updated classes
+- `memory_in_system2.tex` - Added retrieval strategy documentation
+- `SNAPSHOT.md` - Updated to reflect retrieval strategies
+- `JOURNAL.md` - Added this entry
+
+### Key Technical Details
+
+**Retrieval Strategy Features:**
+- **Simple**: Basic attention computation with softmax weighting
+- **Attention**: Multi-head attention with layer normalization
+- **Sophisticated**: Memory decay, multi-head attention, importance weighting
+
+**Parameter Counts by Strategy Combination:**
+- Simple update + Simple retrieval: ~23.3M parameters
+- Sophisticated update + Sophisticated retrieval: ~31.8M parameters
+- All 9 combinations tested and working correctly
+
+**Mathematical Formulation:**
+- All strategies include both matrix and index notation
+- Proper handling of broadcasting vs. Hadamard products
+- Complete complexity analysis for each strategy
+- Clear parameter definitions with dimensions
+
+### Notes
+- Retrieval strategies provide complementary functionality to update strategies
+- Users can now independently choose update and retrieval sophistication levels
+- All implementations are fully vectorized for efficiency
+- Documentation follows strict LaTeX quality standards from latex.mdc
+
 ## 2025-01-XX - Initial Development
 
 ### Completed Tasks ✅
@@ -293,3 +354,102 @@ python train.py --epochs 20 --batch_size 32 --learning_rate 1e-4 --T_cycles 3 --
 - **Before**: `H_module` called inside T_cycles loop (T_cycles times per segment)
 - **After**: `H_module` called once after T_cycles loop (once per segment)
 - **Reasoning**: Standard HRM algorithm processes L for T_cycles, then H once
+
+---
+
+## 2025-01-XX - Memory Update Strategies Implementation
+
+### Completed Tasks ✅
+
+1. **Implemented Three Memory Update Strategies**
+   - **Simple Strategy**: Basic gated update using first token as representative
+   - **Attention Strategy**: Attention-based update mechanism using entire sequence
+   - **Sophisticated Strategy**: Advanced update with decay, importance weighting, and adaptive learning rates
+
+2. **Enhanced WorkingMemory Class**
+   - Added `update_strategy` parameter to constructor
+   - Created separate `_update_memory_*` methods for each strategy
+   - Added conditional parameter creation based on strategy choice
+   - Maintained backward compatibility with default "simple" strategy
+
+3. **Strategy-Specific Features**
+   - **Simple**: First token representative, gated updates, minimal parameters
+   - **Attention**: MultiHeadAttention for update targeting, attention-weighted signals
+   - **Sophisticated**: Memory decay, importance scoring, adaptive learning rates, attention-based interaction
+
+4. **Updated System2Module Integration**
+   - Added `memory_update_strategy` parameter to System2Module constructor
+   - Updated System2Block to pass strategy to WorkingMemory
+   - Enhanced test suite to validate all three strategies
+   - Added comprehensive testing with memory change verification
+
+### Key Technical Features
+
+#### Simple Strategy
+- Uses first token as representative: `representative = current_state[:, 0]`
+- Gated update: `memory[m] = (1-gate) * memory[m] + gate * update`
+- Minimal computational overhead
+- Parameters: Basic linear layers only
+
+#### Attention Strategy
+- Attention between current state and memory slots
+- Attention-weighted update signal: `update_signal = attn_output.mean(dim=1)`
+- Gates based on attention weights: `gates = σ(attn_weights.mean(dim=1))`
+- Uses entire sequence information
+- Parameters: Adds MultiHeadAttention layer
+
+#### Sophisticated Strategy
+- **Memory Decay**: `memory *= decay_factors` (prevents information overload)
+- **Importance Weighting**: Uses all sequence positions with learned importance scores
+- **Adaptive Learning Rates**: Per-slot learning rates based on decay factors
+- **Attention-Based Interaction**: Sophisticated representative-memory interaction
+- Parameters: Adds decay factors, importance scoring, and attention mechanisms
+
+### Performance Characteristics
+
+| Strategy | Parameters | Computation | Memory Decay | Attention | Representative |
+|----------|------------|-------------|--------------|-----------|----------------|
+| Simple   | Low        | Low         | No           | No        | First token    |
+| Attention| Medium     | Medium      | No           | Yes       | Attention-weighted |
+| Sophisticated | High   | High        | Yes          | Yes       | Importance-weighted |
+
+### Files Modified
+
+- `system2_module.py` - Enhanced WorkingMemory class with three update strategies
+- `memory_update_strategies.md` - Comprehensive documentation of all strategies
+- `JOURNAL.md` - This entry documenting the implementation
+
+### Usage Examples
+
+```python
+# Simple memory update (default)
+model = System2Module(..., memory_update_strategy="simple")
+
+# Attention-based memory update
+model = System2Module(..., memory_update_strategy="attention")
+
+# Sophisticated memory update
+model = System2Module(..., memory_update_strategy="sophisticated")
+```
+
+### Test Results
+
+All three strategies successfully update memory during forward passes:
+- **Simple**: Memory change magnitude ~152.6 (largest changes)
+- **Attention**: Memory change magnitude ~136.6 (moderate changes)  
+- **Sophisticated**: Memory change magnitude ~9.2 (most controlled changes)
+
+### Key Benefits
+
+- **Flexibility**: Choose appropriate strategy based on task complexity
+- **Backward Compatibility**: Default "simple" strategy maintains existing behavior
+- **Biological Plausibility**: Sophisticated strategy includes forgetting and importance weighting
+- **Computational Efficiency**: Simple strategy for fast processing, sophisticated for complex reasoning
+- **Memory Management**: Sophisticated strategy prevents information overload through decay
+
+### Notes
+
+- All memory updates use `torch.no_grad()` to prevent gradient flow to memory parameters
+- Memory updates are applied per batch item and memory slot
+- The sophisticated strategy shows the most controlled memory updates, suggesting better stability
+- Ready for production use with configurable memory update sophistication
