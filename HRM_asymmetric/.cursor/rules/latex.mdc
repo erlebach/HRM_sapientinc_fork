@@ -1,0 +1,161 @@
+---
+alwaysApply: false
+---
+# LaTeX Generation Rules
+
+## Core Principles
+
+### Mathematical Rigor
+- **Always use index notation alongside matrix notation** to prevent dimensional errors
+- **Distinguish between Hadamard product and broadcasting** explicitly
+- **Use Einstein summation convention** where repeated indices are summed over
+- **Avoid implicit operations** - make all mathematical operations explicit
+
+### Notation Conventions
+
+#### Index Notation Rules
+- **Einstein Summation:** Repeated indices are summed over (e.g., `∑_j A_ij B_jk`)
+- **Hadamard Products:** All indices must appear on both sides to avoid implicit summation
+  - ✅ Correct: `A_ij ⊙ B_ij` (element-wise multiplication)
+  - ❌ Incorrect: `A_ij ⊙ B_i` (dimension mismatch)
+- **Broadcasting:** Use explicit notation when dimensions don't match
+  - Example: `A_ij α_i` means `α_i` is repeated for each column `j`
+
+#### Matrix vs Index Notation
+- **Matrix notation:** Shows the full operation with proper dimensions
+- **Index notation:** Shows the actual computation with explicit indices
+- **Always provide both** for complex operations
+
+### Dimensional Consistency
+
+#### Hadamard Product Requirements
+- Both operands must have **identical dimensions**
+- Use broadcasting notation when dimensions don't match:
+  - `A ⊙ (b 𝟙^T)` instead of `A ⊙ b`
+  - `A ⊙ (𝟙 b^T)` instead of `A ⊙ b`
+
+#### Broadcasting Notation
+- **Row-wise scaling:** `A_ij α_i` (α_i repeated for each j)
+- **Column-wise scaling:** `A_ij β_j` (β_j repeated for each i)
+- **Matrix creation:** `(a 𝟙^T)_ij = a_i` for all j
+
+### Parameter Definitions
+
+#### Required Information
+- **Dimensions:** Always specify tensor dimensions (e.g., `W ∈ ℝ^(D×M)`)
+- **Purpose:** Brief description of what the parameter does
+- **Learnability:** Whether the parameter is learnable or fixed
+
+#### Example Format
+```latex
+\textbf{Parameter Definitions:}
+\begin{itemize}
+\item $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{D \times M}$: Learnable gate projection matrix
+\item $\boldsymbol{\alpha} \in \mathbb{R}^{M}$: Learnable memory decay factors
+\item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
+\end{itemize}
+```
+
+### Complexity Analysis
+
+#### Asymptotic Complexity
+- **Always provide complexity analysis** for algorithms
+- **Break down by operation type:**
+  - Matrix multiplications: `O(m×n×p)`
+  - Attention computations: `O(B×S×D² + B×S×M×D)`
+  - Element-wise operations: `O(n)`
+- **Include total complexity** and component breakdowns
+
+#### Example Format
+```latex
+\textbf{Asymptotic Complexity:} $O(B \cdot D \cdot M + B \cdot D^2)$
+\begin{itemize}
+\item Gate computation: $O(B \cdot D \cdot M)$
+\item Update preparation: $O(B \cdot D^2 + M \cdot D)$
+\item Memory update: $O(M \cdot D)$
+\end{itemize}
+```
+
+### Clarification Notes
+
+#### When to Add Notes
+- **Broadcasting operations:** Explain what's being repeated
+- **Hadamard vs outer products:** Clarify the operation type
+- **Dimensional transformations:** Explain how dimensions change
+- **Non-standard notation:** Explain any custom symbols or conventions
+
+#### Note Format
+```latex
+\text{(broadcasting: $\alpha_i$ repeated for each column $j$)}
+\text{(true Hadamard product: all indices $b,i$ on both sides)}
+\text{(broadcasting creates proper Hadamard dimensions)}
+```
+
+### Code Implementation Alignment
+
+#### Matrix Operations
+- **Use consistent notation** between LaTeX and code
+- **Verify dimensional consistency** between mathematical description and implementation
+- **Include both vectorized and loop-based descriptions** when relevant
+
+#### Algorithm Descriptions
+- **Use algorithmic environment** for step-by-step procedures
+- **Include comments** explaining each step
+- **Show both matrix and index notation** for complex operations
+
+### Document Structure
+
+#### Required Sections
+1. **Notation Conventions** - Define all symbols and operations
+2. **Parameter Definitions** - List all parameters with dimensions
+3. **Mathematical Formulation** - Core equations with both notations
+4. **Algorithm Description** - Step-by-step procedures
+5. **Complexity Analysis** - Performance characteristics
+6. **Implementation Notes** - Code alignment details
+
+#### Section Organization
+- **Start with conventions** to establish common understanding
+- **Provide examples** for each major concept
+- **Use consistent formatting** throughout
+- **Include cross-references** between sections
+
+### Quality Checks
+
+#### Before Finalizing
+- [ ] All parameters have explicit dimensions
+- [ ] All operations have both matrix and index notation
+- [ ] Broadcasting operations are clearly marked
+- [ ] Hadamard products have matching dimensions
+- [ ] Complexity analysis is provided
+- [ ] Code alignment is verified
+- [ ] Document compiles without errors
+
+#### Common Pitfalls to Avoid
+- ❌ Using `⊙` for operations that aren't true Hadamard products
+- ❌ Missing dimensional specifications
+- ❌ Implicit broadcasting without explanation
+- ❌ Inconsistent notation between sections
+- ❌ Missing complexity analysis
+- ❌ Unclear parameter definitions
+
+### Examples
+
+#### Good Hadamard Product
+```latex
+\mathbf{C} &= \mathbf{A} \odot \mathbf{B} \in \mathbb{R}^{M \times N} \\
+C_{ij} &= A_{ij} B_{ij} \quad \text{(true Hadamard product: all indices $i,j$ on both sides)}
+```
+
+#### Good Broadcasting
+```latex
+\mathbf{C} &= \mathbf{A} \odot (\mathbf{b} \mathbf{1}^T) \in \mathbb{R}^{M \times N} \\
+C_{ij} &= A_{ij} b_i \quad \text{(broadcasting: $b_i$ repeated for each column $j$)}
+```
+
+#### Good Parameter Definition
+```latex
+\item $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{D \times M}$: Learnable gate projection matrix
+\item $\boldsymbol{\alpha} \in \mathbb{R}^{M}$: Learnable memory decay factors
+```
+
+This rule set ensures mathematical rigor, dimensional consistency, and clear communication in all LaTeX documents.

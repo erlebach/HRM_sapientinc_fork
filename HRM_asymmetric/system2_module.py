@@ -88,12 +88,18 @@ class RotaryEmbedding(nn.Module):
 
     def __init__(self, dim: int, max_seq_len: int, base: float = 10000.0):
         super().__init__()
+        if max_seq_len <= 0:
+            raise ValueError(f"max_seq_len must be positive, got {max_seq_len}")
+        if max_seq_len > 100000:  # Reasonable upper bound
+            raise ValueError(f"max_seq_len {max_seq_len} is unreasonably large (>100k)")
+
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
         t = torch.arange(max_seq_len, dtype=torch.float32)
         freqs = torch.outer(t, inv_freq)
         emb = torch.cat((freqs, freqs), dim=-1)
         self.register_buffer("cos_cached", emb.cos())
         self.register_buffer("sin_cached", emb.sin())
+        self.max_seq_len = max_seq_len  # Store for reference
 
     def forward(
         self, seq_len: int
@@ -122,14 +128,13 @@ class WorkingMemory(nn.Module):
         self.update_strategy = update_strategy
         self.retrieval_strategy = retrieval_strategy
 
-        # Timing statistics
+        # Timing statistics with double indexing
         self.timing_stats = {
-            "retrieval_times": [],
-            "update_times": [],
-            "total_retrieval_time": 0.0,
-            "total_update_time": 0.0,
-            "retrieval_count": 0,
-            "update_count": 0,
+            "retrieval_times": {},  # [retrieval_type] => [list of times]
+            "update_times": {},  # [update_type] => [list of times]
+            "total_times": {},  # [update_type][retrieval_type] => total_time
+            "avg_times": {},  # [update_type][retrieval_type] => avg_time
+            "counts": {},  # [update_type][retrieval_type] => count
         }
 
         # Memory buffer (learnable parameters)
@@ -166,18 +171,11 @@ class WorkingMemory(nn.Module):
         current_state: Float[Tensor, "batch seq hidden"],
         update_memory: bool = True,
     ) -> Float[Tensor, "batch seq hidden"]:
-        """Update working memory and return memory-enhanced state.
-
-        Args:
-            current_state: Current reasoning state [batch, seq, hidden]
-            update_memory: Whether to update the memory buffer
-
-        Returns:
-            Memory-enhanced state [batch, seq, hidden]
-        """
+        """Update working memory and return memory-enhanced state."""
         batch_size, seq_len, _ = current_state.shape
 
-        # Retrieve memory using selected strategy
+        # Time memory retrieval
+        start_retrieval = time.perf_counter()
         if self.retrieval_strategy == "simple":
             memory_retrieved = self._retrieve_memory_simple(current_state)
         elif self.retrieval_strategy == "attention":
@@ -186,10 +184,13 @@ class WorkingMemory(nn.Module):
             memory_retrieved = self._retrieve_memory_sophisticated(current_state)
         else:
             raise ValueError(f"Unknown retrieval strategy: {self.retrieval_strategy}")
+        end_retrieval = time.perf_counter()
 
         # Combine current state with retrieved memory
         memory_enhanced = current_state + memory_retrieved
 
+        # Time memory update
+        start_update = time.perf_counter()
         if update_memory:
             if self.update_strategy == "simple":
                 self._update_memory_simple(current_state)
@@ -197,6 +198,39 @@ class WorkingMemory(nn.Module):
                 self._update_memory_attention(current_state)
             elif self.update_strategy == "sophisticated":
                 self._update_memory_sophisticated(current_state)
+        end_update = time.perf_counter()
+
+        # Store timing data
+        retrieval_time = (end_retrieval - start_retrieval) * 1000  # Convert to ms
+        update_time = (end_update - start_update) * 1000  # Convert to ms
+
+        # Store in timing stats
+        if self.update_strategy not in self.timing_stats["retrieval_times"]:
+            self.timing_stats["retrieval_times"][self.update_strategy] = {}
+        if (
+            self.retrieval_strategy
+            not in self.timing_stats["retrieval_times"][self.update_strategy]
+        ):
+            self.timing_stats["retrieval_times"][self.update_strategy][
+                self.retrieval_strategy
+            ] = []
+
+        if self.update_strategy not in self.timing_stats["update_times"]:
+            self.timing_stats["update_times"][self.update_strategy] = {}
+        if (
+            self.retrieval_strategy
+            not in self.timing_stats["update_times"][self.update_strategy]
+        ):
+            self.timing_stats["update_times"][self.update_strategy][
+                self.retrieval_strategy
+            ] = []
+
+        self.timing_stats["retrieval_times"][self.update_strategy][
+            self.retrieval_strategy
+        ].append(retrieval_time)
+        self.timing_stats["update_times"][self.update_strategy][
+            self.retrieval_strategy
+        ].append(update_time)
 
         return memory_enhanced
 
@@ -241,9 +275,7 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["update_times"].append(elapsed_time)
-        self.timing_stats["total_update_time"] += elapsed_time
-        self.timing_stats["update_count"] += 1
+        self._update_timing_stats("update", elapsed_time)
 
     def _update_memory_attention(
         self, current_state: Float[Tensor, "batch seq hidden"]
@@ -288,9 +320,7 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["update_times"].append(elapsed_time)
-        self.timing_stats["total_update_time"] += elapsed_time
-        self.timing_stats["update_count"] += 1
+        self._update_timing_stats("update", elapsed_time)
 
     def _update_memory_sophisticated(
         self, current_state: Float[Tensor, "batch seq hidden"]
@@ -365,9 +395,7 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["update_times"].append(elapsed_time)
-        self.timing_stats["total_update_time"] += elapsed_time
-        self.timing_stats["update_count"] += 1
+        self._update_timing_stats("update", elapsed_time)
 
     def _retrieve_memory_simple(
         self, current_state: Float[Tensor, "batch seq hidden"]
@@ -397,9 +425,7 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["retrieval_times"].append(elapsed_time)
-        self.timing_stats["total_retrieval_time"] += elapsed_time
-        self.timing_stats["retrieval_count"] += 1
+        self._update_timing_stats("retrieval", elapsed_time)
 
         return memory_retrieved
 
@@ -433,9 +459,7 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["retrieval_times"].append(elapsed_time)
-        self.timing_stats["total_retrieval_time"] += elapsed_time
-        self.timing_stats["retrieval_count"] += 1
+        self._update_timing_stats("retrieval", elapsed_time)
 
         return memory_retrieved
 
@@ -478,11 +502,45 @@ class WorkingMemory(nn.Module):
         elapsed_time = end_time - start_time
 
         # Update timing statistics
-        self.timing_stats["retrieval_times"].append(elapsed_time)
-        self.timing_stats["total_retrieval_time"] += elapsed_time
-        self.timing_stats["retrieval_count"] += 1
+        self._update_timing_stats("retrieval", elapsed_time)
 
         return memory_retrieved
+
+    def _update_timing_stats(self, operation_type: str, elapsed_time: float) -> None:
+        """Update timing statistics with structured storage.
+
+        Args:
+            operation_type: Either 'retrieval' or 'update'
+            elapsed_time: Time elapsed in seconds
+        """
+        update_type = self.update_strategy
+        retrieval_type = self.retrieval_strategy
+
+        # Initialize nested dictionaries if needed
+        if operation_type not in self.timing_stats:
+            self.timing_stats[operation_type] = {}
+        if update_type not in self.timing_stats["total_times"]:
+            self.timing_stats["total_times"][update_type] = {}
+        if update_type not in self.timing_stats["avg_times"]:
+            self.timing_stats["avg_times"][update_type] = {}
+        if update_type not in self.timing_stats["counts"]:
+            self.timing_stats["counts"][update_type] = {}
+
+        if retrieval_type not in self.timing_stats["total_times"][update_type]:
+            self.timing_stats["total_times"][update_type][retrieval_type] = 0.0
+        if retrieval_type not in self.timing_stats["avg_times"][update_type]:
+            self.timing_stats["avg_times"][update_type][retrieval_type] = 0.0
+        if retrieval_type not in self.timing_stats["counts"][update_type]:
+            self.timing_stats["counts"][update_type][retrieval_type] = 0
+
+        # Store timing data
+        if update_type not in self.timing_stats[operation_type]:
+            self.timing_stats[operation_type][update_type] = []
+        self.timing_stats[operation_type][update_type].append(elapsed_time)
+
+        # Update combined statistics
+        self.timing_stats["total_times"][update_type][retrieval_type] += elapsed_time
+        self.timing_stats["counts"][update_type][retrieval_type] += 1
 
     def get_timing_stats(self) -> dict:
         """Get timing statistics for memory operations.
@@ -492,48 +550,59 @@ class WorkingMemory(nn.Module):
         """
         stats = self.timing_stats.copy()
 
-        # Calculate averages
-        if stats["retrieval_count"] > 0:
-            stats["avg_retrieval_time"] = (
-                stats["total_retrieval_time"] / stats["retrieval_count"]
-            )
-        else:
-            stats["avg_retrieval_time"] = 0.0
-
-        if stats["update_count"] > 0:
-            stats["avg_update_time"] = (
-                stats["total_update_time"] / stats["update_count"]
-            )
-        else:
-            stats["avg_update_time"] = 0.0
-
-        # Calculate min/max for retrieval times
-        if stats["retrieval_times"]:
-            stats["min_retrieval_time"] = min(stats["retrieval_times"])
-            stats["max_retrieval_time"] = max(stats["retrieval_times"])
-        else:
-            stats["min_retrieval_time"] = 0.0
-            stats["max_retrieval_time"] = 0.0
-
-        # Calculate min/max for update times
-        if stats["update_times"]:
-            stats["min_update_time"] = min(stats["update_times"])
-            stats["max_update_time"] = max(stats["update_times"])
-        else:
-            stats["min_update_time"] = 0.0
-            stats["max_update_time"] = 0.0
+        # Calculate averages for each combination
+        for update_type in stats["total_times"]:
+            for retrieval_type in stats["total_times"][update_type]:
+                if stats["counts"][update_type][retrieval_type] > 0:
+                    stats["avg_times"][update_type][retrieval_type] = (
+                        stats["total_times"][update_type][retrieval_type]
+                        / stats["counts"][update_type][retrieval_type]
+                    )
+                else:
+                    stats["avg_times"][update_type][retrieval_type] = 0.0
 
         return stats
+
+    def print_timing_table(self) -> None:
+        """Print a 3x3 table of timing results in milliseconds."""
+        strategies = ["simple", "attention", "sophisticated"]
+
+        print("\n" + "=" * 80)
+        print("MEMORY OPERATIONS TIMING TABLE (milliseconds)")
+        print("=" * 80)
+        print(
+            f"{'Update\\Retrieval':<15} {'Simple':<12} {'Attention':<12} {'Sophisticated':<12}"
+        )
+        print("-" * 80)
+
+        for update_type in strategies:
+            row = f"{update_type.capitalize():<15}"
+            for retrieval_type in strategies:
+                if (
+                    update_type in self.timing_stats["avg_times"]
+                    and retrieval_type in self.timing_stats["avg_times"][update_type]
+                ):
+                    avg_time_ms = (
+                        self.timing_stats["avg_times"][update_type][retrieval_type]
+                        * 1000
+                    )
+                    row += f"{avg_time_ms:<12.1f}"
+                else:
+                    row += f"{'N/A':<12}"
+            print(row)
+
+        print("-" * 80)
+        print("Note: Times are average per operation in milliseconds")
+        print("=" * 80)
 
     def reset_timing_stats(self) -> None:
         """Reset timing statistics."""
         self.timing_stats = {
-            "retrieval_times": [],
-            "update_times": [],
-            "total_retrieval_time": 0.0,
-            "total_update_time": 0.0,
-            "retrieval_count": 0,
-            "update_count": 0,
+            "retrieval_times": {},  # [retrieval_type] => [list of times]
+            "update_times": {},  # [update_type] => [list of times]
+            "total_times": {},  # [update_type][retrieval_type] => total_time
+            "avg_times": {},  # [update_type][retrieval_type] => avg_time
+            "counts": {},  # [update_type][retrieval_type] => count
         }
 
 
@@ -715,7 +784,9 @@ class System2Module(nn.Module):
         self.memory_retrieval_strategy = memory_retrieval_strategy
 
         # More layers for System 2 (depth over speed)
-        effective_layers = max(2, num_layers)
+        # effective_layers = max(2, num_layers)
+        # The user is reponsible for setting the correct number of layers
+        effective_layers = num_layers
 
         self.layers = nn.ModuleList(
             [
@@ -789,14 +860,25 @@ class System2Module(nn.Module):
 
 if __name__ == "__main__":
     # Test System2Module with different memory update and retrieval strategies
-    batch_size, seq_len, hidden_size = 2, 10, 512
-    num_heads, intermediate_size, max_seq_len = 8, 2048, 128
-    num_layers = 4
+    batch_size, seq_len, hidden_size = 1, 8000, 256
+    num_heads, intermediate_size, max_seq_len = (
+        8,
+        hidden_size * 4,
+        8000,
+    )  # Changed from 128 to 256
+    num_layers = 1
     memory_size = 64
 
     # Test all combinations of memory update and retrieval strategies
     update_strategies = ["simple", "attention", "sophisticated"]
     retrieval_strategies = ["simple", "attention", "sophisticated"]
+
+    # Global timing collector
+    global_timing_stats = {
+        "total_times": {},  # [update_type][retrieval_type] => total_time
+        "avg_times": {},  # [update_type][retrieval_type] => avg_time
+        "counts": {},  # [update_type][retrieval_type] => count
+    }
 
     for update_strategy in update_strategies:
         for retrieval_strategy in retrieval_strategies:
@@ -822,8 +904,48 @@ if __name__ == "__main__":
             # Store initial memory state
             initial_memory = model.layers[0].working_memory.memory.clone()
 
-            # Forward pass
-            output = model(hidden_states, input_injection)
+            # Forward pass - run multiple times for accurate timing
+            num_iterations = 5
+            warmup_iterations = 2
+
+            # Warmup runs (discard timing)
+            for _ in range(warmup_iterations):
+                _ = model(hidden_states, input_injection)
+
+            # Timed runs
+            for _ in range(num_iterations):
+                output = model(hidden_states, input_injection)
+
+            # Collect timing from all layers and normalize
+            total_retrieval_time = 0
+            total_update_time = 0
+            layer_count = 0
+
+            for layer in model.layers:
+                if hasattr(layer, "working_memory"):
+                    layer_count += 1
+                    retrieval_times = layer.working_memory.timing_stats[
+                        "retrieval_times"
+                    ][update_strategy][retrieval_strategy]
+                    update_times = layer.working_memory.timing_stats["update_times"][
+                        update_strategy
+                    ][retrieval_strategy]
+
+                    total_retrieval_time += sum(
+                        retrieval_times[-num_iterations:]
+                    )  # Last num_iterations
+                    total_update_time += sum(
+                        update_times[-num_iterations:]
+                    )  # Last num_iterations
+
+            # Calculate normalized timings
+            avg_retrieval_time = total_retrieval_time / (num_iterations * layer_count)
+            avg_update_time = total_update_time / (num_iterations * layer_count)
+            total_memory_time = avg_retrieval_time + avg_update_time
+
+            # Normalize by batch_size, seq_len, hidden_size
+            normalized_time = total_memory_time / (batch_size * seq_len * hidden_size)
+            per_token_time = total_memory_time / (batch_size * seq_len)
 
             # Check if memory was updated
             final_memory = model.layers[0].working_memory.memory
@@ -859,21 +981,200 @@ if __name__ == "__main__":
             print(f"  Retrieved magnitude: {torch.norm(retrieved).item():.6f}")
             print(f"  Retrieval successful: {retrieved.shape == test_state.shape}")
 
-            # Display timing statistics
+            # Collect timing statistics for global table
             timing_stats = working_memory.get_timing_stats()
+
+            # Initialize global stats for this combination
+            if update_strategy not in global_timing_stats["total_times"]:
+                global_timing_stats["total_times"][update_strategy] = {}
+                global_timing_stats["avg_times"][update_strategy] = {}
+                global_timing_stats["counts"][update_strategy] = {}
+
+            if (
+                retrieval_strategy
+                not in global_timing_stats["total_times"][update_strategy]
+            ):
+                global_timing_stats["total_times"][update_strategy][
+                    retrieval_strategy
+                ] = 0.0
+                global_timing_stats["avg_times"][update_strategy][
+                    retrieval_strategy
+                ] = 0.0
+                global_timing_stats["counts"][update_strategy][retrieval_strategy] = 0
+
+            # Accumulate timing data
+            if (
+                update_strategy in timing_stats["total_times"]
+                and retrieval_strategy in timing_stats["total_times"][update_strategy]
+            ):
+                global_timing_stats["total_times"][update_strategy][
+                    retrieval_strategy
+                ] += timing_stats["total_times"][update_strategy][retrieval_strategy]
+                global_timing_stats["counts"][update_strategy][retrieval_strategy] += (
+                    timing_stats["counts"][update_strategy][retrieval_strategy]
+                )
+
+                # Calculate average
+                if (
+                    global_timing_stats["counts"][update_strategy][retrieval_strategy]
+                    > 0
+                ):
+                    global_timing_stats["avg_times"][update_strategy][
+                        retrieval_strategy
+                    ] = (
+                        global_timing_stats["total_times"][update_strategy][
+                            retrieval_strategy
+                        ]
+                        / global_timing_stats["counts"][update_strategy][
+                            retrieval_strategy
+                        ]
+                    )
+
+            # Display individual timing statistics
             print(f"\n  === TIMING STATISTICS ===")
-            print(f"  Retrieval Operations:")
-            print(f"    Count: {timing_stats['retrieval_count']}")
-            print(f"    Total time: {timing_stats['total_retrieval_time']:.6f}s")
-            print(f"    Average time: {timing_stats['avg_retrieval_time']:.6f}s")
-            print(f"    Min time: {timing_stats['min_retrieval_time']:.6f}s")
-            print(f"    Max time: {timing_stats['max_retrieval_time']:.6f}s")
-            print(f"  Update Operations:")
-            print(f"    Count: {timing_stats['update_count']}")
-            print(f"    Total time: {timing_stats['total_update_time']:.6f}s")
-            print(f"    Average time: {timing_stats['avg_update_time']:.6f}s")
-            print(f"    Min time: {timing_stats['min_update_time']:.6f}s")
-            print(f"    Max time: {timing_stats['max_update_time']:.6f}s")
-            print(
-                f"  Total Memory Operations Time: {timing_stats['total_retrieval_time'] + timing_stats['total_update_time']:.6f}s"
-            )
+            if (
+                update_strategy in timing_stats["total_times"]
+                and retrieval_strategy in timing_stats["total_times"][update_strategy]
+            ):
+                total_time = timing_stats["total_times"][update_strategy][
+                    retrieval_strategy
+                ]
+                count = timing_stats["counts"][update_strategy][retrieval_strategy]
+                avg_time = timing_stats["avg_times"][update_strategy][
+                    retrieval_strategy
+                ]
+
+                print(f"  Total Operations: {count}")
+                print(f"  Total time: {total_time:.6f}s")
+                print(f"  Average time: {avg_time:.6f}s ({avg_time*1000:.1f}ms)")
+            else:
+                print("  No timing data available")
+
+    # Move this OUTSIDE the loop, after all combinations are processed
+    # Store normalized timings for each combination
+    for update_strategy in update_strategies:
+        for retrieval_strategy in retrieval_strategies:
+            if (
+                update_strategy in global_timing_stats["total_times"]
+                and retrieval_strategy
+                in global_timing_stats["total_times"][update_strategy]
+            ):
+                # Calculate normalized values for this combination
+                total_time = global_timing_stats["total_times"][update_strategy][
+                    retrieval_strategy
+                ]
+                count = global_timing_stats["counts"][update_strategy][
+                    retrieval_strategy
+                ]
+                avg_time = total_time / count if count > 0 else 0
+
+                # Calculate normalized values
+                normalized_time = avg_time / (batch_size * seq_len * hidden_size)
+                per_token_time = avg_time / (batch_size * seq_len)
+
+                # Store normalized data
+                if "normalized_times" not in global_timing_stats:
+                    global_timing_stats["normalized_times"] = {}
+                if update_strategy not in global_timing_stats["normalized_times"]:
+                    global_timing_stats["normalized_times"][update_strategy] = {}
+                if (
+                    retrieval_strategy
+                    not in global_timing_stats["normalized_times"][update_strategy]
+                ):
+                    global_timing_stats["normalized_times"][update_strategy][
+                        retrieval_strategy
+                    ] = []
+
+                global_timing_stats["normalized_times"][update_strategy][
+                    retrieval_strategy
+                ].append(
+                    {
+                        "raw_ms": avg_time,
+                        "normalized_per_element": normalized_time,
+                        "per_token_ms": per_token_time,
+                        "batch_size": batch_size,
+                        "seq_len": seq_len,
+                        "hidden_size": hidden_size,
+                    }
+                )
+
+    # Print final 3x3 timing table
+    print("\n" + "=" * 140)
+    print("FINAL MEMORY OPERATIONS TIMING TABLE")
+    print("=" * 140)
+    print(
+        f"{'Update\\Retrieval':<15} | {'Raw (ms)':<12} {'ns/element':<12} {'ns/token':<12} | {'Raw (ms)':<12} {'ns/element':<12} {'ns/token':<12} | {'Raw (ms)':<12} {'ns/element':<12} {'ns/token':<12}"
+    )
+    print("-" * 140)
+    print(f"{'':<15} | {'Simple':<36} | {'Attention':<36} | {'Sophisticated':<36}")
+    print("-" * 140)
+
+    for update_type in update_strategies:
+        row = f"{update_type.capitalize():<15} |"
+        for retrieval_type in retrieval_strategies:
+            if (
+                update_type in global_timing_stats["avg_times"]
+                and retrieval_type in global_timing_stats["avg_times"][update_type]
+            ):
+                # Raw timing in milliseconds
+                avg_time_ms = (
+                    global_timing_stats["avg_times"][update_type][retrieval_type] * 1000
+                )
+
+                # Get normalized data if available
+                if (
+                    "normalized_times" in global_timing_stats
+                    and update_type in global_timing_stats["normalized_times"]
+                    and retrieval_type
+                    in global_timing_stats["normalized_times"][update_type]
+                    and global_timing_stats["normalized_times"][update_type][
+                        retrieval_type
+                    ]
+                ):
+                    # Get the latest normalized data
+                    latest_data = global_timing_stats["normalized_times"][update_type][
+                        retrieval_type
+                    ][-1]
+                    normalized_per_element = (
+                        latest_data["normalized_per_element"] * 1e9
+                    )  # Convert to nanoseconds
+                    per_token_ns = (
+                        latest_data["per_token_ms"] * 1e6
+                    )  # Convert to nanoseconds
+
+                    row += f" {avg_time_ms:<12.1f} {normalized_per_element:<12.1f} {per_token_ns:<12.1f} |"
+                else:
+                    row += f" {avg_time_ms:<12.1f} {'N/A':<12} {'N/A':<12} |"
+            else:
+                row += f" {'N/A':<12} {'N/A':<12} {'N/A':<12} |"
+        print(row)
+
+    print("-" * 140)
+    print("TIMING METRICS EXPLANATION:")
+    print("-" * 140)
+    print("Raw (ms):        Total memory operation time in milliseconds")
+    print(
+        "ns/element:      Nanoseconds per data element (batch_size × seq_len × hidden_size)"
+    )
+    print("                 - Measures computational efficiency per element processed")
+    print("                 - Lower values indicate more efficient memory operations")
+    print(
+        "                 - Should be roughly constant across different problem sizes if operations scale linearly"
+    )
+    print("")
+    print("ns/token:        Nanoseconds per token (batch_size × seq_len)")
+    print("                 - Measures computational cost per token in the sequence")
+    print("                 - Shows how memory operations scale with sequence length")
+    print(
+        "                 - Linear scaling: ns/token remains constant as seq_len increases"
+    )
+    print(
+        "                 - Quadratic scaling: ns/token increases linearly with seq_len"
+    )
+    print("")
+    print(
+        f"Problem size: batch={batch_size}, seq_len={seq_len}, hidden_size={hidden_size}"
+    )
+    print(f"Total elements: {batch_size * seq_len * hidden_size:,}")
+    print(f"Total tokens: {batch_size * seq_len:,}")
+    print("=" * 140)

@@ -1,0 +1,50 @@
+# Quick Commit Rule
+
+## Purpose
+Quickly commit modified files with an intelligent commit message.
+
+## Implementation
+
+```bash
+# Check for modified files only
+if [ -z "$(git diff --name-only)" ]; then
+    echo "No changes to commit"
+    exit 0
+fi
+
+# Stage only modified files (not untracked)
+git add -u
+
+# Generate commit message based on file changes
+if git diff --cached --name-only | grep -q "asymmetric_hrm.py"; then
+    if git diff --cached asymmetric_hrm.py | grep -q "H_to_L_proj\|H_module"; then
+        MSG="fix: correct HRM architecture - move projections and H processing outside T_cycles loop"
+    elif git diff --cached asymmetric_hrm.py | grep -q "def\|class"; then
+        MSG="feat: add new features and improve code structure"
+    else
+        MSG="refactor: improve code quality and structure"
+    fi
+elif git diff --cached --name-only | grep -q "JOURNAL.md\|SNAPSHOT.md"; then
+    MSG="docs: update project documentation and tracking"
+else
+    MSG="fix: general improvements and updates"
+fi
+
+# Add file details
+FILES=$(git diff --cached --name-only | tr '\n' ' ')
+MSG="$MSG
+
+Files: $FILES"
+
+# Commit
+git commit -m "$MSG"
+```
+
+## Usage
+Run this rule when you want to quickly commit all modified files with an appropriate message.
+
+## Features
+- Only commits modified files (not untracked)
+- Generates intelligent commit messages based on file types
+- Handles common change patterns
+- Quick and simple execution
