@@ -99,7 +99,7 @@ The working memory supports three retrieval strategies, selected via the $\text{
 
 \paragraph{Strategy 1: Simple Retrieval}
 
-When $\text{retrieval\_strategy} = \text{"simple"}$:
+When $\text{retrieval\_strategy} = \text{"simple"}$, the system performs a straightforward attention-based memory retrieval that computes similarity scores between the current input and stored memory patterns.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -113,17 +113,23 @@ When $\text{retrieval\_strategy} = \text{"simple"}$:
 A_{\text{ret},bsi} &= \sum_{j=1}^{D} x_{bsj} M_{ij}
 \end{align}
 
+The attention computation calculates raw similarity scores between each input token $\mathbf{x}_{bs}$ and every memory slot $\mathbf{M}_i$. The dot product $A_{\text{ret},bsi}$ measures how similar the current input is to the $i$-th memory pattern. Higher values indicate greater similarity, suggesting that the corresponding memory slot contains relevant information for the current context.
+
 \item \textbf{Attention Weights:}
 \begin{align}
 \mathbf{W}_{\text{ret},S} &= \text{softmax}(\mathbf{A}_{\text{ret}}, \text{dim}=-1) \in \mathbb{R}^{B \times S \times M} \\
 W_{\text{ret},S,bsi} &= \frac{\exp(A_{\text{ret},bsi})}{\sum_{i'=1}^{M} \exp(A_{\text{ret},bsi'})}
 \end{align}
 
+The softmax normalization converts raw similarity scores into a probability distribution over memory slots. Each weight $W_{\text{ret},S,bsi}$ represents the probability that memory slot $i$ is relevant for input token $s$ in batch $b$. The softmax ensures that $\sum_{i=1}^{M} W_{\text{ret},S,bsi} = 1$, creating a proper attention mechanism where the model can attend to multiple memory slots with varying degrees of importance.
+
 \item \textbf{Memory Retrieval:}
 \begin{align}
 \mathbf{R}_{\text{mem}} &= \mathbf{W}_{\text{ret},S} \mathbf{M} \in \mathbb{R}^{B \times S \times D} \\
 R_{\text{mem},bsj} &= \sum_{i=1}^{M} W_{\text{ret},S,bsi} M_{ij}
 \end{align}
+
+The final retrieval step computes a weighted average of all memory slots, where each memory slot contributes proportionally to its attention weight. This creates a context-aware memory representation $\mathbf{R}_{\text{mem}}$ that combines relevant information from multiple memory patterns. The resulting vector $\mathbf{R}_{\text{mem},bs}$ represents what the model "remembers" about the current input, synthesized from its stored knowledge base.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D \cdot M)$
 \begin{itemize}
@@ -138,11 +144,20 @@ R_{\text{mem},bsj} &= \sum_{i=1}^{M} W_{\text{ret},S,bsi} M_{ij}
 \item Memory matrix: $O(M \cdot D)$
 \item Intermediate tensors: $O(B \cdot S \cdot D)$
 \end{itemize}
+
+\item \textbf{RMS Normalization:}
+\begin{align}
+\mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}}) \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
+\end{align}
+
+RMS normalization stabilizes the retrieved memory representations by scaling each dimension based on the root mean square of the vector. While not strictly necessary for the simple retrieval strategy, it provides consistency across all retrieval methods and ensures stable training behavior.
+where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
 \end{enumerate}
 
 \paragraph{Strategy 2: Attention-Based Retrieval}
 
-When $\text{retrieval\_strategy} = \text{"attention"}$:
+When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sophisticated multi-head attention mechanism that allows the model to attend to different aspects of the memory simultaneously, providing richer memory interactions than simple dot-product attention.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -160,11 +175,15 @@ R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\s
 W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
+The multi-head attention mechanism transforms the input into three different representations: queries ($\mathbf{Q}$), keys ($\mathbf{K}$), and values ($\mathbf{V}$). Each head $h$ learns to attend to different types of relationships between the input and memory. The scaling factor $\sqrt{D/H}$ prevents the attention scores from becoming too large, maintaining stable gradients during training. The final output $\mathbf{R}_{\text{mem}}$ is a weighted combination of memory values, where the weights are determined by the learned attention patterns across all heads.
+
 \item \textbf{RMS Normalization:}
 \begin{align}
 \mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}}) \in \mathbb{R}^{B \times S \times D} \\
 R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
 \end{align}
+
+RMS normalization stabilizes the retrieved memory representations by scaling each dimension based on the root mean square of the vector. This normalization technique, used in modern language models like LLaMA, provides better training stability compared to Layer Normalization while being computationally more efficient. The learnable scale parameter $w_j$ allows the model to adapt the normalization to the specific requirements of each dimension.
 where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
@@ -184,7 +203,7 @@ where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small
 
 \paragraph{Strategy 3: Sophisticated Retrieval}
 
-When $\text{retrieval\_strategy} = \text{"sophisticated"}$:
+When $\text{retrieval\_strategy} = \text{"sophisticated"}$, the system implements an advanced memory retrieval mechanism that incorporates temporal decay, importance weighting, and multi-head attention to create a more biologically plausible and contextually aware memory system.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -202,6 +221,8 @@ When $\text{retrieval\_strategy} = \text{"sophisticated"}$:
 M_{\text{decayed},ij} &= M_{ij} \alpha_{\text{ret},i} \quad \text{(broadcasting: $\alpha_{\text{ret},i}$ repeated for each column $j$)}
 \end{align}
 
+The memory decay mechanism simulates the natural forgetting process observed in human memory. Each memory slot $i$ has its own decay factor $\alpha_{\text{ret},i} \in [0,1]$, where values closer to 0 indicate stronger forgetting. This allows the model to learn which memories should be retained longer and which should decay more quickly, creating a more realistic memory system that can prioritize important information while allowing less relevant memories to fade.
+
 \item \textbf{Multi-Head Attention with Decayed Memory:}
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
@@ -210,11 +231,15 @@ R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\s
 W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
+The attention mechanism operates on the decayed memory, ensuring that the model's attention is influenced by the temporal relevance of stored information. This creates a dynamic memory system where older, less relevant memories have reduced influence on the current computation, while recent and important memories maintain their full impact.
+
 \item \textbf{RMS Normalization:}
 \begin{align}
 \mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}}) \in \mathbb{R}^{B \times S \times D} \\
 R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
 \end{align}
+
+The RMS normalization step ensures that the retrieved memory representations have consistent magnitude across different inputs and memory states, preventing the decay mechanism from causing numerical instabilities during training.
 where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
 
 \item \textbf{Importance Weighting:}
@@ -224,6 +249,8 @@ I_{\text{weights},\sigma,bs1} &= \sigma\left(\sum_{j=1}^{D} x_{bsj} W_{\text{imp
 \mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights},\sigma} \in \mathbb{R}^{B \times S \times D} \\
 R_{\text{mem},bsj} &= R_{\text{mem},bsj} I_{\text{weights},\sigma,bs1} \quad \text{(broadcasting: $I_{\text{weights},\sigma,bs1}$ repeated for each column $j$)}
 \end{align}
+
+The importance weighting mechanism provides a final layer of contextual filtering, allowing the model to dynamically adjust the strength of retrieved memory based on the current input's characteristics. The sigmoid activation ensures that importance weights are bounded between 0 and 1, where values closer to 1 indicate that the retrieved memory is highly relevant to the current context. This creates a sophisticated gating mechanism that can suppress irrelevant memories while amplifying important ones, similar to how human attention works in cognitive tasks.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
 \begin{itemize}
@@ -259,7 +286,7 @@ The working memory supports three update strategies, selected via the $\text{upd
 
 \paragraph{Strategy 1: Simple Update}
 
-When $\text{update\_strategy} = \text{"simple"}$:
+When $\text{update\_strategy} = \text{"simple"}$, the system implements a straightforward memory update mechanism that uses the first token of each sequence as a representative and applies context-dependent updates based on the current memory state.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -275,11 +302,15 @@ When $\text{update\_strategy} = \text{"simple"}$:
 r_{bj} &= x_{b0j} \quad \text{(first token of each sequence)}
 \end{align}
 
+The representative selection uses the first token of each sequence as a summary of the current input. This choice prioritizes computational efficiency over information content, relying on the model's ability to learn appropriate representations through the loss function. The first token often contains important contextual information in many language tasks, making it a reasonable heuristic for memory updates.
+
 \item \textbf{Update Gate Computation:}
 \begin{align}
 \mathbf{g}_\sigma &= \sigma(\mathbf{r} \mathbf{W}_{\text{gate}}) \in \mathbb{R}^{B \times M} \\
 g_{\sigma,bi} &= \sigma\left(\sum_{j=1}^{D} r_{bj} W_{\text{gate},ji}\right) \quad \text{where } \sigma(x) = \frac{1}{1 + e^{-x}}
 \end{align}
+
+The gate computation determines how much each memory slot should be updated based on the current representative. The sigmoid activation ensures that gate values are bounded between 0 and 1, where values closer to 1 indicate that the corresponding memory slot should be significantly updated. This creates a selective update mechanism that can preserve important memories while allowing others to be modified.
 
 \item \textbf{Memory Update Preparation:}
 \begin{align}
@@ -288,6 +319,8 @@ g_{\sigma,bi} &= \sigma\left(\sum_{j=1}^{D} r_{bj} W_{\text{gate},ji}\right) \qu
 \mathbf{u} &= \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix} \in \mathbb{R}^{B \times D} \\
 u_{bj} &= \sum_{k=1}^{2D} W_{\text{update},kj} \begin{bmatrix} r_{bk} \\ \bar{m}_k \end{bmatrix}
 \end{align}
+
+The update preparation creates a context-dependent update signal by combining the current representative with the average memory state. The concatenation $[\mathbf{r}, \bar{\mathbf{m}}]$ allows the model to learn different update strategies based on both the current input and the existing memory context. This enables the system to adapt its memory updates based on what it already knows, creating a more sophisticated learning mechanism than simple input-based updates.
 
 \item \textbf{Vectorized Memory Update:}
 \begin{align}
@@ -298,6 +331,8 @@ u_{bj} &= \sum_{k=1}^{2D} W_{\text{update},kj} \begin{bmatrix} r_{bk} \\ \bar{m}
 \mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}}_\sigma \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_\sigma \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T) \\
 M_{ij} &\leftarrow (1 - \bar{g}_{\sigma,i}) M_{ij} + \bar{g}_{\sigma,i} \bar{u}_j \quad \text{(broadcasting: $\bar{g}_{\sigma,i}$ and $\bar{u}_j$ create $M \times D$ matrices)}
 \end{align}
+
+The final update step applies a weighted combination of the old memory and the new update signal. The formula $M_{ij} \leftarrow (1 - \bar{g}_{\sigma,i}) M_{ij} + \bar{g}_{\sigma,i} \bar{u}_j$ implements a gated update where $\bar{g}_{\sigma,i}$ controls the interpolation between preserving the old memory and incorporating the new information. This creates a smooth, continuous update process that can learn to balance memory stability with adaptability.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot D \cdot M + B \cdot D^2)$
 \begin{itemize}
@@ -318,7 +353,7 @@ M_{ij} &\leftarrow (1 - \bar{g}_{\sigma,i}) M_{ij} + \bar{g}_{\sigma,i} \bar{u}_
 
 \paragraph{Strategy 2: Attention-Based Update}
 
-When $\text{update\_strategy} = \text{"attention"}$:
+When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophisticated attention mechanism to determine both what information to store and how much to update each memory slot, creating a more contextually aware memory update process.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -336,17 +371,23 @@ A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\s
 W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
+The memory attention mechanism computes how much each input token should attend to each memory slot, creating both an enhanced representation $\mathbf{A}_{\text{mem}}$ and attention weights $\mathbf{W}_{\text{attn},S}$. This allows the model to identify which memory slots are most relevant to the current input, providing a more nuanced understanding of memory relevance than simple similarity measures.
+
 \item \textbf{Update Signal:}
 \begin{align}
 \mathbf{s} &= \frac{1}{S}\sum_{s=1}^{S} \mathbf{A}_{\text{mem}}[:, s, :] \in \mathbb{R}^{B \times D} \\
 s_{bj} &= \frac{1}{S}\sum_{s=1}^{S} A_{\text{mem},bsj}
 \end{align}
 
+The update signal aggregates the attention-enhanced representations across all sequence positions, creating a single representative vector that captures the most important information from the current input. This averaging process ensures that the update signal reflects the overall context of the sequence rather than being dominated by individual tokens.
+
 \item \textbf{Attention-Based Gates:}
 \begin{align}
 \mathbf{g}_{\text{attn},\sigma} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} \mathbf{W}_{\text{attn},S}[:, s, :]\right) \in \mathbb{R}^{B \times M} \\
 g_{\text{attn},\sigma,bi} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} W_{\text{attn},S,bsi}\right)
 \end{align}
+
+The attention-based gates determine update strengths by averaging the attention weights across sequence positions. This creates a more sophisticated gating mechanism where the update strength for each memory slot is directly related to how much attention the current input paid to that slot. Memory slots that received more attention will be updated more strongly, creating a contextually appropriate update pattern.
 
 \item \textbf{Vectorized Memory Update:}
 \begin{align}
@@ -377,7 +418,7 @@ M_{ij} &\leftarrow (1 - \bar{g}_{\text{attn},\sigma,i}) M_{ij} + \bar{g}_{\text{
 
 \paragraph{Strategy 3: Sophisticated Update}
 
-When $\text{update\_strategy} = \text{"sophisticated"}$:
+When $\text{update\_strategy} = \text{"sophisticated"}$, the system implements the most advanced memory update mechanism that combines temporal decay, importance-weighted representation, and adaptive learning rates to create a biologically inspired memory system with sophisticated forgetting and consolidation processes.
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
@@ -397,6 +438,8 @@ M_{ij} &\leftarrow M_{ij} \alpha_i \quad \text{(broadcasting: $\alpha_i$ repeate
 \end{align}
 where $\mathbf{1} \in \mathbb{R}^{D}$ is a vector of ones, making $\boldsymbol{\alpha} \mathbf{1}^T \in \mathbb{R}^{M \times D}$ for proper Hadamard product dimensions.
 
+The memory decay step simulates the natural forgetting process that occurs in biological memory systems. Each memory slot has its own decay factor $\alpha_i \in [0,1]$, allowing the model to learn which memories should be retained longer and which should decay more quickly. This creates a dynamic memory system where less important information naturally fades over time, while crucial memories are preserved.
+
 \item \textbf{Importance-Weighted Representative:}
 \begin{align}
 \mathbf{w}_S &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \in \mathbb{R}^{B \times S} \\
@@ -404,6 +447,8 @@ w_{S,bs} &= \frac{\exp(\sigma(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}))}{\sum_{
 \mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{w}_S[:, s] \odot \mathbf{x}[:, s, :] \in \mathbb{R}^{B \times D} \\
 r_{\text{imp},bj} &= \sum_{s=1}^{S} w_{S,bs} x_{bsj} \quad \text{(broadcasting: $w_{S,bs}$ repeated for each column $j$)}
 \end{align}
+
+The importance-weighted representative mechanism replaces the simple "first token" approach with a learned, context-aware selection process. The model learns to identify which parts of the input sequence are most important for memory updates, creating a representative that reflects the overall significance of the current input rather than just its beginning. This allows the system to focus on the most relevant information when updating memory.
 
 \textbf{Role of $\mathbf{w}_S$ and $\mathbf{r}_{\text{imp}}$:}
 \begin{itemize}
@@ -419,6 +464,8 @@ A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\
 W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
+The attention-based memory interaction computes how much the importance-weighted representative should attend to each memory slot. This creates a sophisticated interaction pattern where the model can identify which memories are most relevant to the current important information, providing a more nuanced understanding of memory relationships than simple similarity measures.
+
 \item \textbf{Adaptive Learning Rates:}
 \begin{align}
 \mathbf{g}_{\text{base},\sigma} &= \sigma(\mathbf{r}_{\text{imp}} \mathbf{W}_{\text{gate}}) \in \mathbb{R}^{B \times M} \\
@@ -429,6 +476,8 @@ g_{\text{final},bi} &= g_{\text{base},\sigma,bi} W_{\text{soph},S,b0i} \quad \te
 \lambda_{bi} &= g_{\text{final},bi} (1 - \alpha_i) \quad \text{(broadcasting: $\alpha_i$ repeated for each batch $b$)}
 \end{align}
 
+The adaptive learning rates create a sophisticated update mechanism that combines three factors: (1) the base gate from the importance-weighted representative, (2) the attention weights from memory interaction, and (3) the decay factors. The final learning rate $\lambda_{bi}$ is higher for memories that are both relevant (high attention) and not already decayed (high $\alpha_i$), creating a contextually appropriate update pattern that balances memory stability with adaptability.
+
 \item \textbf{Vectorized Sophisticated Update:}
 \begin{align}
 \bar{\boldsymbol{\lambda}} &= \frac{1}{B}\sum_{b=1}^{B} \boldsymbol{\lambda}[b, :] \in \mathbb{R}^{M} \\
@@ -438,6 +487,8 @@ g_{\text{final},bi} &= g_{\text{base},\sigma,bi} W_{\text{soph},S,b0i} \quad \te
 \mathbf{M} &\leftarrow (1 - \bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}_{\text{soph}}^T) \\
 M_{ij} &\leftarrow (1 - \bar{\lambda}_i) M_{ij} + \bar{\lambda}_i \bar{u}_{\text{soph},j} \quad \text{(broadcasting: $\bar{\lambda}_i$ and $\bar{u}_{\text{soph},j}$ create $M \times D$ matrices)}
 \end{align}
+
+The final update step applies the sophisticated learning rates to create a contextually aware memory update. The formula $M_{ij} \leftarrow (1 - \bar{\lambda}_i) M_{ij} + \bar{\lambda}_i \bar{u}_{\text{soph},j}$ implements an adaptive interpolation where the learning rate $\bar{\lambda}_i$ is determined by the combination of importance, attention, and decay factors. This creates a memory system that can learn to balance stability with adaptability based on the contextual relevance of information.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D + B \cdot D^2 + B \cdot M \cdot D)$
 \begin{itemize}
