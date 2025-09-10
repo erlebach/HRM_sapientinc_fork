@@ -1202,4 +1202,220 @@ This hierarchical relationship has important implications:
 
 The unified framework demonstrates that memory retrieval sophistication lies on a continuum, where each strategy represents a different point balancing computational cost, biological plausibility, and representational power.
 
+\section{Appendix D: Relationships Between Memory Update Strategies}
+
+This appendix analyzes the mathematical and conceptual relationships between the three memory update strategies, demonstrating how they form a hierarchical progression from simple to sophisticated memory storage mechanisms.
+
+\subsection{Strategy 2 as a Generalization of Strategy 1}
+
+\subsubsection{Mathematical Relationship}
+
+Strategy 1 (Simple Update) can be viewed as a special case of Strategy 2 (Attention-Based Update) when specific constraints are applied to the attention mechanism and representative selection.
+
+\textbf{Strategy 1 Formulation:}
+\begin{align}
+\mathbf{r} &= \mathbf{x}[:, 0, :] \quad \text{(First token representative)} \\
+\mathbf{g}_\sigma &= \sigma(\mathbf{r} \mathbf{W}_{\text{gate}}) \\
+\bar{\mathbf{m}} &= \frac{1}{M}\sum_{i=1}^{M} \mathbf{M}[i, :] \\
+\mathbf{u} &= \mathbf{W}_{\text{update}} \begin{bmatrix} \mathbf{r} \\ \bar{\mathbf{m}} \end{bmatrix} \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}}_\sigma \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_\sigma \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T)
+\end{align}
+
+\textbf{Strategy 2 Formulation:}
+\begin{align}
+\mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \\
+\mathbf{s} &= \frac{1}{S}\sum_{s=1}^{S} \mathbf{A}_{\text{mem}}[:, s, :] \quad \text{(Attention-based representative)} \\
+\mathbf{g}_{\text{attn},\sigma} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} \mathbf{W}_{\text{attn},S}[:, s, :]\right) \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T)
+\end{align}
+
+\textbf{Equivalence Conditions:}
+
+Strategy 2 reduces to Strategy 1 when:
+\begin{itemize}
+\item \textbf{Identity Attention:} $\mathbf{W}_q = \mathbf{W}_k = \mathbf{W}_v = \mathbf{I}$ and $H = 1$
+\item \textbf{First Token Focus:} Attention weights concentrate on the first token: $W_{\text{attn},S,bsi} \approx \delta_{s0}$ (Kronecker delta)
+\item \textbf{Direct Update:} $\mathbf{W}_{\text{update}} = [\mathbf{I}, \mathbf{0}]$ (ignores memory context)
+\end{itemize}
+
+Under these conditions:
+\begin{align}
+\mathbf{A}_{\text{mem}} &\approx \mathbf{x} \quad \text{(identity attention)} \\
+\mathbf{s} &\approx \mathbf{x}[:, 0, :] = \mathbf{r} \quad \text{(first token focus)} \\
+\mathbf{g}_{\text{attn},\sigma} &\approx \sigma(\mathbf{r} \mathbf{W}_{\text{gate}}) = \mathbf{g}_\sigma \quad \text{(direct gating)}
+\end{align}
+
+\subsubsection{Conceptual Interpretation}
+
+\begin{itemize}
+\item \textbf{Strategy 1:} "Update memory based on the first token and current memory state"
+\item \textbf{Strategy 2:} "Update memory based on attention-weighted input and attention-driven gating"
+\end{itemize}
+
+Strategy 2 generalizes Strategy 1 by replacing:
+\begin{enumerate}
+\item \textbf{Fixed representative} (first token) → \textbf{Attention-weighted representative} (learned selection)
+\item \textbf{Direct gating} (input-based) → \textbf{Attention-based gating} (context-aware)
+\item \textbf{Simple update signal} (concatenated input+memory) → \textbf{Attention-enhanced signal} (learned combination)
+\end{enumerate}
+
+\subsection{Strategy 3 as an Extension of Strategy 2}
+
+\subsubsection{Mathematical Relationship}
+
+Strategy 3 (Sophisticated Update) extends Strategy 2 by adding three key components: memory decay, importance-weighted representation, and adaptive learning rates.
+
+\textbf{Strategy 2 Base:}
+\begin{align}
+\mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \\
+\mathbf{s} &= \frac{1}{S}\sum_{s=1}^{S} \mathbf{A}_{\text{mem}}[:, s, :] \\
+\mathbf{g}_{\text{attn},\sigma} &= \sigma\left(\frac{1}{S}\sum_{s=1}^{S} \mathbf{W}_{\text{attn},S}[:, s, :]\right) \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T)
+\end{align}
+
+\textbf{Strategy 3 Extensions:}
+\begin{enumerate}
+\item \textbf{Memory Decay:}
+\begin{equation}
+\mathbf{M} \leftarrow \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T)
+\end{equation}
+
+\item \textbf{Importance-Weighted Representative:}
+\begin{align}
+\mathbf{w}_S &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \\
+\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{w}_S[:, s] \odot \mathbf{x}[:, s, :]
+\end{align}
+
+\item \textbf{Enhanced Memory Interaction:}
+\begin{align}
+\mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M})
+\end{align}
+
+\item \textbf{Adaptive Learning Rates:}
+\begin{align}
+\mathbf{g}_{\text{base},\sigma} &= \sigma(\mathbf{r}_{\text{imp}} \mathbf{W}_{\text{gate}}) \\
+\mathbf{g}_{\text{final}} &= \mathbf{g}_{\text{base},\sigma} \odot \mathbf{W}_{\text{soph},S}[:, 0, :] \\
+\boldsymbol{\lambda} &= \mathbf{g}_{\text{final}} \odot (\mathbf{1} (1 - \boldsymbol{\alpha})^T)
+\end{align}
+\end{enumerate}
+
+\textbf{Reduction Conditions:}
+
+Strategy 3 reduces to Strategy 2 when:
+\begin{itemize}
+\item \textbf{No Decay:} $\boldsymbol{\alpha} = \mathbf{1}$ (all ones vector)
+\item \textbf{Uniform Importance:} $\mathbf{w}_S = \frac{1}{S} \mathbf{1}$ (equal weights for all tokens)
+\item \textbf{Identity Memory Interaction:} $\mathbf{W}_{\text{soph},S} = \mathbf{1}$ (uniform attention)
+\end{itemize}
+
+Under these conditions:
+\begin{align}
+\mathbf{r}_{\text{imp}} &= \frac{1}{S}\sum_{s=1}^{S} \mathbf{x}[:, s, :] = \mathbf{s} \quad \text{(uniform averaging)} \\
+\mathbf{g}_{\text{final}} &= \mathbf{g}_{\text{base},\sigma} = \sigma(\mathbf{s} \mathbf{W}_{\text{gate}}) = \mathbf{g}_{\text{attn},\sigma} \quad \text{(direct gating)} \\
+\boldsymbol{\lambda} &= \mathbf{g}_{\text{final}} \odot \mathbf{0} = \mathbf{0} \quad \text{(no updates due to decay)}
+\end{align}
+
+\subsubsection{Conceptual Interpretation}
+
+Strategy 3 adds \textbf{biological realism} and \textbf{temporal awareness}:
+
+\begin{itemize}
+\item \textbf{Memory Decay:} Simulates natural forgetting where memories fade over time unless reinforced
+\item \textbf{Importance Weighting:} Learns which parts of the input are most relevant for memory updates
+\item \textbf{Adaptive Learning Rates:} Combines importance, attention, and decay to determine update strength
+\item \textbf{Temporal Dynamics:} Creates a memory system that evolves over time
+\end{itemize}
+
+\subsection{Hierarchical Progression}
+
+The three update strategies form a \textbf{hierarchical progression} of increasing sophistication:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Feature} & \textbf{Strategy 1} & \textbf{Strategy 2} & \textbf{Strategy 3} \\
+\hline
+Representative Selection & Fixed (first token) & Attention-weighted & Importance-weighted \\
+Gating Mechanism & Input-based & Attention-based & Adaptive (multi-factor) \\
+Memory Processing & Direct & Direct & Decayed \\
+Temporal Awareness & No & No & Yes \\
+Context Filtering & Basic & Attention & Importance + Attention \\
+Learning Rate & Fixed & Fixed & Adaptive \\
+\hline
+\end{tabular}
+\caption{Hierarchical progression of update strategies}
+\end{table}
+
+\subsection{Unified Mathematical Framework}
+
+All three strategies can be expressed in a unified framework:
+
+\begin{align}
+\mathbf{M} &\leftarrow \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T) \quad &\text{(Memory decay)} \\
+\mathbf{r} &= \text{Representative}(\mathbf{x}, \mathbf{M}) \quad &\text{(Representative selection)} \\
+\mathbf{g} &= \text{Gating}(\mathbf{r}, \mathbf{M}) \quad &\text{(Update gating)} \\
+\mathbf{u} &= \text{UpdateSignal}(\mathbf{r}, \mathbf{M}) \quad &\text{(Update signal)} \\
+\mathbf{M} &\leftarrow (1 - \bar{\mathbf{g}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T) \quad &\text{(Memory update)}
+\end{align}
+
+Where:
+\begin{itemize}
+\item \textbf{Strategy 1:} $\boldsymbol{\alpha} = \mathbf{1}$, Representative = first token, Gating = direct, UpdateSignal = concatenated
+\item \textbf{Strategy 2:} $\boldsymbol{\alpha} = \mathbf{1}$, Representative = attention-weighted, Gating = attention-based, UpdateSignal = attention-enhanced
+\item \textbf{Strategy 3:} $\boldsymbol{\alpha}$ = learned, Representative = importance-weighted, Gating = adaptive, UpdateSignal = context-aware
+\end{itemize}
+
+\subsection{Memory Storage Dynamics}
+
+\subsubsection{Strategy 1: Static Storage}
+\begin{itemize}
+\item \textbf{Storage Pattern:} Fixed updates based on first token
+\item \textbf{Memory Evolution:} Linear combination of old and new information
+\item \textbf{Forgetting:} No explicit forgetting mechanism
+\item \textbf{Context Sensitivity:} Limited to current input and average memory state
+\end{itemize}
+
+\subsubsection{Strategy 2: Attention-Driven Storage}
+\begin{itemize}
+\item \textbf{Storage Pattern:} Context-aware updates based on attention patterns
+\item \textbf{Memory Evolution:} Attention-weighted combination of old and new information
+\item \textbf{Forgetting:} No explicit forgetting, but attention can suppress updates
+\item \textbf{Context Sensitivity:} High - uses full sequence context for updates
+\end{itemize}
+
+\subsubsection{Strategy 3: Adaptive Storage}
+\begin{itemize}
+\item \textbf{Storage Pattern:} Biologically inspired updates with temporal dynamics
+\item \textbf{Memory Evolution:} Decay + importance + attention + adaptive learning rates
+\item \textbf{Forgetting:} Explicit decay mechanism with learnable rates
+\item \textbf{Context Sensitivity:} Maximum - uses importance weighting + attention + temporal awareness
+\end{itemize}
+
+\subsection{Design Implications}
+
+This hierarchical relationship has important implications for memory system design:
+
+\begin{enumerate}
+\item \textbf{Progressive Complexity:} Each strategy builds upon the previous one, allowing for gradual sophistication
+\item \textbf{Memory Efficiency:} Simpler strategies use less computational resources
+\item \textbf{Biological Plausibility:} More sophisticated strategies better model human memory processes
+\item \textbf{Task Adaptability:} Different tasks may require different levels of memory sophistication
+\item \textbf{Training Stability:} Simpler strategies may be easier to train initially
+\end{enumerate}
+
+\subsection{Memory Storage Requirements}
+
+All three strategies require \textbf{persistent memory storage} during training:
+
+\begin{itemize}
+\item \textbf{Strategy 1:} Memory matrix $\mathbf{M}$ must persist across training steps
+\item \textbf{Strategy 2:} Memory matrix + attention parameters must persist
+\item \textbf{Strategy 3:} Memory matrix + decay factors + attention parameters must persist
+\end{itemize}
+
+Without persistent storage, there would be no memory to retrieve or update, making the entire memory mechanism non-functional.
+
+The unified framework demonstrates that memory update sophistication lies on a continuum, where each strategy represents a different point balancing computational cost, biological plausibility, and representational power for memory storage and consolidation.
+
 \end{document}
