@@ -1041,4 +1041,165 @@ This analysis highlights the importance of:
 
 The memory update mechanism provides the \textit{possibility} of sophisticated, context-dependent learning, but successful training is required to realize this potential.
 
+\section{Appendix C: Relationships Between Retrieval Strategies}
+
+This appendix analyzes the mathematical and conceptual relationships between the three memory retrieval strategies, demonstrating how they form a hierarchical progression from simple to sophisticated mechanisms.
+
+\subsection{Strategy 2 as a Generalization of Strategy 1}
+
+\subsubsection{Mathematical Relationship}
+
+Strategy 1 (Simple Retrieval) can be viewed as a special case of Strategy 2 (Attention-Based Retrieval) when specific constraints are applied to the learned parameters.
+
+\textbf{Strategy 1 Formulation:}
+\begin{align}
+\mathbf{A}_{\text{ret}} &= \mathbf{x} \mathbf{M}^T \\
+\mathbf{W}_{\text{ret},S} &= \text{softmax}(\mathbf{A}_{\text{ret}}) \\
+\mathbf{R}_{\text{mem}} &= \mathbf{W}_{\text{ret},S} \mathbf{M}
+\end{align}
+
+\textbf{Strategy 2 Formulation (Single Head):}
+\begin{align}
+\mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
+\mathbf{A}_{\text{attn}} &= \frac{\mathbf{Q} \mathbf{K}^T}{\sqrt{D}} \\
+\mathbf{W}_{\text{ret},S} &= \text{softmax}(\mathbf{A}_{\text{attn}}) \\
+\mathbf{R}_{\text{mem}} &= \mathbf{W}_{\text{ret},S} \mathbf{V}
+\end{align}
+
+\textbf{Equivalence Conditions:}
+
+Strategy 2 reduces to Strategy 1 when:
+\begin{itemize}
+\item \textbf{Identity Projections:} $\mathbf{W}_q = \mathbf{W}_k = \mathbf{W}_v = \mathbf{I}$
+\item \textbf{Single Head:} $H = 1$
+\item \textbf{Unit Scaling:} $\sqrt{D} = 1$ (or absorbed into learning)
+\end{itemize}
+
+Under these conditions:
+\begin{equation}
+\mathbf{Q} = \mathbf{x}, \quad \mathbf{K} = \mathbf{V} = \mathbf{M}
+\end{equation}
+
+This gives:
+\begin{equation}
+\mathbf{A}_{\text{attn}} = \mathbf{x} \mathbf{M}^T = \mathbf{A}_{\text{ret}}
+\end{equation}
+
+Therefore, Strategy 1 is Strategy 2 with \textbf{constrained projections}.
+
+\subsubsection{Conceptual Interpretation}
+
+\begin{itemize}
+\item \textbf{Strategy 1:} "What is the direct similarity between input and memory?"
+\item \textbf{Strategy 2:} "What is the learned similarity between transformed input and transformed memory?"
+\end{itemize}
+
+Strategy 2 generalizes Strategy 1 by allowing the model to learn \textbf{task-specific similarity functions} through the projection matrices $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v$.
+
+\subsection{Strategy 3 as an Extension of Strategy 2}
+
+\subsubsection{Mathematical Relationship}
+
+Strategy 3 (Sophisticated Retrieval) extends Strategy 2 by adding three key components: memory decay, importance weighting, and enhanced memory interaction.
+
+\textbf{Strategy 2 Base:}
+\begin{align}
+\mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \\
+\mathbf{R}_{\text{mem}} &= \text{RMSNorm}(\mathbf{R}_{\text{mem}})
+\end{align}
+
+\textbf{Strategy 3 Extensions:}
+\begin{enumerate}
+\item \textbf{Memory Decay:}
+\begin{equation}
+\mathbf{M}_{\text{decayed}} = \mathbf{M} \odot (\boldsymbol{\alpha}_{\text{ret}} \mathbf{1}^T)
+\end{equation}
+
+\item \textbf{Decayed Memory Attention:}
+\begin{equation}
+\mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} = \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}})
+\end{equation}
+
+\item \textbf{Importance Weighting:}
+\begin{align}
+\mathbf{I}_{\text{weights},\sigma} &= \sigma(\mathbf{x} \mathbf{W}_{\text{imp}}) \\
+\mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights},\sigma}
+\end{align}
+\end{enumerate}
+
+\textbf{Reduction Conditions:}
+
+Strategy 3 reduces to Strategy 2 when:
+\begin{itemize}
+\item \textbf{No Decay:} $\boldsymbol{\alpha}_{\text{ret}} = \mathbf{1}$ (all ones vector)
+\item \textbf{No Importance Weighting:} $\mathbf{I}_{\text{weights},\sigma} = \mathbf{1}$ (all ones)
+\end{itemize}
+
+Under these conditions:
+\begin{align}
+\mathbf{M}_{\text{decayed}} &= \mathbf{M} \\
+\mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{1} = \mathbf{R}_{\text{mem}}
+\end{align}
+
+\subsubsection{Conceptual Interpretation}
+
+Strategy 3 adds \textbf{biological realism} and \textbf{contextual awareness}:
+
+\begin{itemize}
+\item \textbf{Memory Decay:} Simulates natural forgetting processes where older or less important memories fade over time
+\item \textbf{Importance Weighting:} Provides context-dependent gating that can suppress irrelevant memories based on current input characteristics
+\item \textbf{Enhanced Attention:} Operates on temporally-aware memory representations
+\end{itemize}
+
+\subsection{Hierarchical Progression}
+
+The three strategies form a \textbf{hierarchical progression} of increasing sophistication:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Feature} & \textbf{Strategy 1} & \textbf{Strategy 2} & \textbf{Strategy 3} \\
+\hline
+Similarity Function & Fixed (dot product) & Learned (attention) & Learned (attention) \\
+Memory Processing & Direct & Direct & Decayed \\
+Output Processing & Direct & RMS normalized & RMS + importance \\
+Temporal Awareness & No & No & Yes \\
+Context Filtering & No & No & Yes \\
+\hline
+\end{tabular}
+\caption{Hierarchical progression of retrieval strategies}
+\end{table}
+
+\subsection{Unified Mathematical Framework}
+
+All three strategies can be expressed in a unified framework:
+
+\begin{align}
+\mathbf{M}' &= \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T) \quad &\text{(Memory decay)} \\
+\mathbf{R}_{\text{mem}} &= \text{Attention}(\mathbf{x}, \mathbf{M}', \mathbf{M}') \quad &\text{(Similarity computation)} \\
+\mathbf{R}_{\text{mem}} &= \text{Normalize}(\mathbf{R}_{\text{mem}}) \quad &\text{(Stabilization)} \\
+\mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights}} \quad &\text{(Importance filtering)}
+\end{align}
+
+Where:
+\begin{itemize}
+\item \textbf{Strategy 1:} $\boldsymbol{\alpha} = \mathbf{1}$, Attention = dot product, Normalize = identity, $\mathbf{I}_{\text{weights}} = \mathbf{1}$
+\item \textbf{Strategy 2:} $\boldsymbol{\alpha} = \mathbf{1}$, Attention = multi-head, Normalize = RMSNorm, $\mathbf{I}_{\text{weights}} = \mathbf{1}$
+\item \textbf{Strategy 3:} $\boldsymbol{\alpha}$ = learned, Attention = multi-head, Normalize = RMSNorm, $\mathbf{I}_{\text{weights}}$ = learned
+\end{itemize}
+
+\subsection{Design Implications}
+
+This hierarchical relationship has important implications:
+
+\begin{enumerate}
+\item \textbf{Progressive Complexity:} Each strategy builds upon the previous one, allowing for gradual sophistication
+\item \textbf{Backward Compatibility:} More sophisticated strategies can degrade gracefully to simpler ones
+\item \textbf{Ablation Studies:} The relationships enable systematic analysis of each component's contribution
+\item \textbf{Adaptive Selection:} Systems can dynamically choose appropriate complexity based on task requirements
+\end{enumerate}
+
+The unified framework demonstrates that memory retrieval sophistication lies on a continuum, where each strategy represents a different point balancing computational cost, biological plausibility, and representational power.
+
 \end{document}
