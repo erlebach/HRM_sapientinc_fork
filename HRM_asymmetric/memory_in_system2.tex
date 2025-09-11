@@ -33,6 +33,8 @@
 
 \textbf{Function Notation:} We use $\text{RMSNorm}(\cdot)$ for RMS normalization, $\text{softmax}(\cdot)$ for softmax, and $\sigma(\cdot)$ for sigmoid consistently throughout.
 
+\textbf{Overbar Notation:} Variables with overbars (e.g., $\bar{\mathbf{g}}$, $\bar{\mathbf{u}}$) represent batch-averaged quantities: $\bar{\mathbf{x}} = \frac{1}{B}\sum_{b=1}^{B} \mathbf{x}[b, :]$.
+
 \section{Overview}
 
 The System2Module implements Kahneman's System 2 thinking through a sophisticated transformer architecture with persistent working memory. The forward pass combines input injection, multi-layer processing with memory enhancement, and reasoning history maintenance.
@@ -172,7 +174,8 @@ When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sop
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
 R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi,h} V_{ij,h} \\
-W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
+\text{where } W_{\text{ret},S,bsi,h} &= \text{softmax}(W_{\text{ret},bsi,h}) \\
+\text{and } W_{\text{ret},bsi,h} &= \frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}
 \end{align}
 
 The multi-head attention mechanism transforms the input into three different representations: queries ($\mathbf{Q}$), keys ($\mathbf{K}$), and values ($\mathbf{V}$). Each head $h$ learns to attend to different types of relationships between the input and memory. The scaling factor $\sqrt{D/H}$ prevents the attention scores from becoming too large, maintaining stable gradients during training. The final output $\mathbf{R}_{\text{mem}}$ is a weighted combination of memory values, where the weights are determined by the learned attention patterns across all heads.
@@ -226,8 +229,9 @@ The memory decay mechanism simulates the natural forgetting process observed in 
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M}_{\text{decayed}} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M}_{\text{decayed}} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
-W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi,h} V_{ij,h} \\
+\text{where } W_{\text{ret},S,bsi,h} &= \text{softmax}(W_{\text{ret},bsi,h}) \\
+\text{and } W_{\text{ret},bsi,h} &= \frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}
 \end{align}
 
 The attention mechanism operates on the decayed memory, ensuring that the model's attention is influenced by the temporal relevance of stored information. This creates a dynamic memory system where older, less relevant memories have reduced influence on the current computation, while recent and important memories maintain their full impact.
@@ -366,8 +370,9 @@ When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophis
 \begin{align}
 \mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
-W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
+A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{attn},S,bsi} V_{ij,h} \\
+\text{where } W_{\text{attn},S,bsi} &= \text{softmax}(W_{\text{attn},bsi}) \\
+\text{and } W_{\text{attn},bsi} &= \frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}
 \end{align}
 
 The memory attention mechanism computes how much each input token should attend to each memory slot, creating both an enhanced representation $\mathbf{A}_{\text{mem}}$ and attention weights $\mathbf{W}_{\text{attn},S}$. This allows the model to identify which memory slots are most relevant to the current input, providing a more nuanced understanding of memory relevance than simple similarity measures.
@@ -441,17 +446,17 @@ The memory decay step simulates the natural forgetting process that occurs in bi
 
 \item \textbf{Importance-Weighted Representative:}
 \begin{align}
-\mathbf{w}_S &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \in \mathbb{R}^{B \times S} \\
-w_{S,bs} &= \frac{\exp(\sigma(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}))}{\sum_{s'=1}^{S} \exp(\sigma(\sum_{j=1}^{D} x_{bs'j} W_{\text{imp},j1}))} \\
-\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{w}_S[:, s] \odot \mathbf{x}[:, s, :] \in \mathbb{R}^{B \times D} \\
-r_{\text{imp},bj} &= \sum_{s=1}^{S} w_{S,bs} x_{bsj} \quad \text{(broadcasting: $w_{S,bs}$ repeated for each column $j$)}
+\mathbf{W}_{\text{imp},S} &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \in \mathbb{R}^{B \times S} \\
+W_{\text{imp},S,bs} &= \frac{\exp(\sigma(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}))}{\sum_{s'=1}^{S} \exp(\sigma(\sum_{j=1}^{D} x_{bs'j} W_{\text{imp},j1}))} \\
+\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{W}_{\text{imp},S}[:, s] \odot \mathbf{x}[:, s, :] \in \mathbb{R}^{B \times D} \\
+r_{\text{imp},bj} &= \sum_{s=1}^{S} W_{\text{imp},S,bs} x_{bsj} \quad \text{(broadcasting: $W_{\text{imp},S,bs}$ repeated for each column $j$)}
 \end{align}
 
 The importance-weighted representative mechanism replaces the simple "first token" approach with a learned, context-aware selection process. The model learns to identify which parts of the input sequence are most important for memory updates, creating a representative that reflects the overall significance of the current input rather than just its beginning. This allows the system to focus on the most relevant information when updating memory.
 
-\textbf{Role of $\mathbf{w}_S$ and $\mathbf{r}_{\text{imp}}$:}
+\textbf{Role of $\mathbf{W}_{\text{imp},S}$ and $\mathbf{r}_{\text{imp}}$:}
 \begin{itemize}
-\item \textbf{$\mathbf{w}_S$ (importance weights):} Softmax-normalized attention weights that determine how much each sequence position contributes to the representative. Each row sums to 1, creating a probability distribution over sequence positions.
+\item \textbf{$\mathbf{W}_{\text{imp},S}$ (importance weights):} Softmax-normalized attention weights that determine how much each sequence position contributes to the representative. Each row sums to 1, creating a probability distribution over sequence positions.
 \item \textbf{$\mathbf{r}_{\text{imp}}$ (importance-weighted representative):} A single representative vector per batch item that combines all sequence positions according to their learned importance. This replaces the simple "first token" approach with a learned, context-aware selection mechanism.
 \end{itemize}
 
@@ -459,8 +464,9 @@ The importance-weighted representative mechanism replaces the simple "first toke
 \begin{align}
 \mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times 1 \times D} \times \mathbb{R}^{B \times 1 \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{r}_{\text{imp}} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
-W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right)
+A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{soph},S,b1i} V_{ij,h} \\
+\text{where } W_{\text{soph},S,b1i} &= \text{softmax}(W_{\text{soph},b1i}) \\
+\text{and } W_{\text{soph},b1i} &= \frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}
 \end{align}
 
 The attention-based memory interaction computes how much the importance-weighted representative should attend to each memory slot. This creates a sophisticated interaction pattern where the model can identify which memories are most relevant to the current important information, providing a more nuanced understanding of memory relationships than simple similarity measures.
@@ -678,8 +684,8 @@ where $P_{\max}$ is the maximum history length.
         \STATE $\mathbf{M} \leftarrow (1 - \bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\mathbf{g}}_{\text{attn},\sigma} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{s}}^T)$ \COMMENT{Vectorized update}
     \ELSIF{update\_strategy = "sophisticated"}
         \STATE $\mathbf{M} \leftarrow \mathbf{M} \odot (\boldsymbol{\alpha} \mathbf{1}^T)$ \COMMENT{Memory decay (row-wise scaling)}
-        \STATE $\mathbf{w}_S \leftarrow \text{softmax}(\sigma(\mathbf{W}_{\text{imp}} \mathbf{x}), \text{dim}=1)$ \COMMENT{Importance weights}
-        \STATE $\mathbf{r}_{\text{imp}} \leftarrow \sum_{s=1}^{S} \mathbf{w}_S[:, s] \odot \mathbf{x}[:, s, :]$ \COMMENT{Importance representative (broadcasting: $w_{S,bs}$ repeated for each column)}
+        \STATE $\mathbf{W}_{\text{imp},S} \leftarrow \text{softmax}(\sigma(\mathbf{W}_{\text{imp}} \mathbf{x}), \text{dim}=1)$ \COMMENT{Importance weights}
+        \STATE $\mathbf{r}_{\text{imp}} \leftarrow \sum_{s=1}^{S} \mathbf{W}_{\text{imp},S}[:, s] \odot \mathbf{x}[:, s, :]$ \COMMENT{Importance representative (broadcasting: $W_{\text{imp},S,bs}$ repeated for each column)}
         \STATE $(\mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S}) \leftarrow \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M})$
         \STATE $\boldsymbol{\lambda} \leftarrow \sigma(\mathbf{W}_{\text{gate}} \mathbf{r}_{\text{imp}}) \odot \mathbf{W}_{\text{soph},S}[:, 0, :] \odot (\mathbf{1} (1 - \boldsymbol{\alpha})^T)$ \COMMENT{Adaptive learning rates}
         \STATE $\mathbf{M} \leftarrow (1 - \bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot \mathbf{M} + (\bar{\boldsymbol{\lambda}} \mathbf{1}^T) \odot (\mathbf{1} \bar{\mathbf{u}}^T)$ \COMMENT{Vectorized sophisticated update}
@@ -1281,8 +1287,8 @@ Strategy 3 (Sophisticated Update) extends Strategy 2 by adding three key compone
 
 \item \textbf{Importance-Weighted Representative:}
 \begin{align}
-\mathbf{w}_S &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \\
-\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{w}_S[:, s] \odot \mathbf{x}[:, s, :]
+\mathbf{W}_{\text{imp},S} &= \text{softmax}(\sigma(\mathbf{x} \mathbf{W}_{\text{imp}}), \text{dim}=1) \\
+\mathbf{r}_{\text{imp}} &= \sum_{s=1}^{S} \mathbf{W}_{\text{imp},S}[:, s] \odot \mathbf{x}[:, s, :]
 \end{align}
 
 \item \textbf{Enhanced Memory Interaction:}
@@ -1303,7 +1309,7 @@ Strategy 3 (Sophisticated Update) extends Strategy 2 by adding three key compone
 Strategy 3 reduces to Strategy 2 when:
 \begin{itemize}
 \item \textbf{No Decay:} $\boldsymbol{\alpha} = \mathbf{1}$ (all ones vector)
-\item \textbf{Uniform Importance:} $\mathbf{w}_S = \frac{1}{S} \mathbf{1}$ (equal weights for all tokens)
+\item \textbf{Uniform Importance:} $\mathbf{W}_{\text{imp},S} = \frac{1}{S} \mathbf{1}$ (equal weights for all tokens)
 \item \textbf{Identity Memory Interaction:} $\mathbf{W}_{\text{soph},S} = \mathbf{1}$ (uniform attention)
 \end{itemize}
 
@@ -1464,5 +1470,132 @@ The relative position decay formulation provides a more biologically plausible m
 Future research directions include the investigation of **hierarchical temporal decay** where different memory layers exhibit different temporal characteristics, **context-dependent decay modulation** where external factors influence forgetting rates, and **adaptive consolidation** where the system learns optimal decay schedules for different types of information. These extensions would further enhance the biological plausibility and practical utility of temporal memory systems in neural architectures.
 
 The integration of relative position decay with existing positional encoding techniques and physical time dynamics represents a significant advancement in the development of biologically inspired memory systems for neural architectures. This approach provides a foundation for more sophisticated temporal reasoning capabilities that can enhance the performance of large language models and other sequence processing systems.
+
+\section{Appendix F: Importance Weighting in Memory Retrieval}
+
+This appendix provides a detailed analysis of the importance weighting mechanism employed in Strategy 3 (Sophisticated Retrieval), explaining its computational implementation, biological motivation, and practical benefits for context-aware memory systems.
+
+\subsection{Mechanism Overview}
+
+The importance weighting mechanism serves as a **final contextual filter** that dynamically adjusts the strength of retrieved memory based on the current input's characteristics. Unlike the attention mechanisms that determine which memory slots to retrieve from, importance weighting determines how much of the retrieved information should actually be used in the current context.
+
+The mechanism operates through a two-step process. First, the system computes importance scores for each input token using a learned projection matrix. Second, these scores are applied as multiplicative gates to the retrieved memory representations, effectively filtering the retrieved information based on its perceived relevance to the current context.
+
+\subsection{Mathematical Formulation}
+
+The importance weighting mechanism is implemented through the following mathematical operations:
+
+\begin{align}
+\mathbf{I}_{\text{weights},\sigma} &= \sigma(\mathbf{x} \mathbf{W}_{\text{imp}}) \in \mathbb{R}^{B \times S \times 1} \\
+I_{\text{weights},\sigma,bs1} &= \sigma\left(\sum_{j=1}^{D} x_{bsj} W_{\text{imp},j1}\right) \\
+\mathbf{R}_{\text{mem}} &= \mathbf{R}_{\text{mem}} \odot \mathbf{I}_{\text{weights},\sigma} \in \mathbb{R}^{B \times S \times D} \\
+R_{\text{mem},bsj} &= R_{\text{mem},bsj} I_{\text{weights},\sigma,bs1}
+\end{align}
+
+The first equation computes importance scores by projecting the input sequence through a learned matrix $\mathbf{W}_{\text{imp}} \in \mathbb{R}^{D \times 1}$ and applying a sigmoid activation. The sigmoid ensures that importance scores are bounded between 0 and 1, where values closer to 1 indicate high relevance and values closer to 0 indicate low relevance. The second equation applies these importance scores as multiplicative gates to the retrieved memory, with broadcasting ensuring that each importance score affects all dimensions of the corresponding retrieved memory vector.
+
+\subsection{Biological Motivation}
+
+The importance weighting mechanism is inspired by **selective attention** processes in human cognition. When humans retrieve information from memory, they do not use all retrieved information equally. Instead, they selectively focus on information that is most relevant to the current task or context, effectively filtering out irrelevant details while amplifying important information.
+
+This selective attention process is crucial for efficient cognitive processing. Without it, humans would be overwhelmed by irrelevant information retrieved from memory, making it difficult to focus on the task at hand. The importance weighting mechanism provides a computational analog of this biological process, enabling neural networks to exhibit similar selective attention behaviors.
+
+The sigmoid activation function used in importance weighting is particularly well-suited for this purpose. It provides a smooth, differentiable way to implement binary-like decisions about information relevance while maintaining gradient flow for learning. The bounded output range ensures that the mechanism can completely suppress irrelevant information (scores near 0) or fully utilize important information (scores near 1), with smooth transitions between these extremes.
+
+\subsection{Computational Benefits}
+
+The importance weighting mechanism provides several computational advantages that enhance the overall performance of memory-augmented neural networks. **Contextual relevance filtering** enables the system to dynamically adjust its use of retrieved information based on the current input, preventing the system from being distracted by irrelevant memories. This filtering is particularly important in long sequences where the system may retrieve information that was relevant earlier in the sequence but is no longer useful for the current processing step.
+
+**Dynamic memory strength modulation** allows the system to amplify important memories while suppressing less relevant ones. This capability is crucial for maintaining focus on the most important information, especially when the memory system retrieves multiple pieces of information that may have varying degrees of relevance to the current context. The system can learn to identify which types of information are most useful for different types of inputs, enabling sophisticated context-dependent memory usage.
+
+**Computational efficiency** is another key benefit of importance weighting. By reducing the effective strength of less relevant retrieved information, the mechanism can reduce the computational impact of irrelevant memories on downstream processing. This efficiency gain is particularly important in large-scale systems where memory retrieval may return substantial amounts of information that may not all be equally useful.
+
+\subsection{Practical Applications}
+
+The importance weighting mechanism has broad applicability across various domains where context-aware memory systems are beneficial. In **natural language processing**, the mechanism can help systems focus on the most relevant retrieved information when processing complex texts, improving the quality of generated responses and reducing the influence of irrelevant retrieved context.
+
+In **question answering systems**, importance weighting can help the system focus on the most relevant retrieved passages when answering questions, improving accuracy and reducing the impact of irrelevant retrieved information. The mechanism enables the system to dynamically adjust its attention to different parts of the retrieved information based on the specific question being asked.
+
+**Conversational AI systems** can benefit from importance weighting by enabling more contextually appropriate responses. The mechanism allows the system to focus on the most relevant aspects of the conversation history when generating responses, improving coherence and relevance while reducing the influence of less relevant historical information.
+
+\subsection{Learning Dynamics}
+
+The importance weighting mechanism learns to identify relevant information through gradient-based optimization. The learned projection matrix $\mathbf{W}_{\text{imp}}$ develops representations that can distinguish between relevant and irrelevant retrieved information based on the current input context. This learning process enables the system to develop sophisticated understanding of which types of information are most useful in different contexts.
+
+The sigmoid activation function provides smooth gradients that facilitate learning, enabling the system to gradually refine its understanding of information relevance. The bounded output range ensures that the learning process remains stable while allowing the system to develop strong preferences for relevant information and strong suppression of irrelevant information.
+
+\subsection{Integration with Other Memory Mechanisms}
+
+The importance weighting mechanism integrates seamlessly with other memory mechanisms in the sophisticated retrieval strategy. It operates after memory decay and attention-based retrieval, providing a final layer of contextual filtering that enhances the overall effectiveness of the memory system. The mechanism complements the attention mechanisms by providing additional context-dependent filtering that operates at a different level of the memory processing pipeline.
+
+The integration with RMS normalization ensures that the importance weighting mechanism operates on properly normalized retrieved memory representations, preventing numerical instabilities that could arise from the multiplicative gating operation. This integration creates a robust memory processing pipeline that can handle complex contextual filtering while maintaining computational stability.
+
+The importance weighting mechanism represents a crucial component of sophisticated memory systems, providing the contextual awareness necessary for effective memory usage in complex neural architectures. Its biological motivation, computational benefits, and practical applications make it an essential tool for developing more intelligent and contextually aware artificial intelligence systems.
+
+\section{Appendix G: Normalization Strategies in Attention and Memory Mechanisms}
+
+This appendix examines the choice between softmax and sigmoid normalization in attention mechanisms and memory systems, exploring the theoretical foundations, biological motivations, and practical implications of different normalization strategies.
+
+\subsection{The Softmax-Sigmoid Dichotomy}
+
+The choice between softmax and sigmoid normalization in neural architectures has traditionally been based on different use cases and computational requirements. Softmax normalization, defined as $\text{softmax}(x_i) = \exp(x_i) / \sum_j \exp(x_j)$, creates a probability distribution where weights sum to unity. Sigmoid normalization, defined as $\sigma(x_i) = 1 / (1 + \exp(-x_i))$, produces independent bounded values between 0 and 1. While both approaches have their merits, the biological and computational considerations suggest that sigmoid normalization may be more appropriate for many memory and attention applications.
+
+\subsection{Biological Motivation for Sigmoid Normalization}
+
+From a biological perspective, sigmoid normalization better reflects the independent nature of attention and memory processes in human cognition. When humans attend to multiple stimuli or retrieve multiple memories, the strength of attention to one stimulus does not necessarily reduce the attention paid to others. This independence is naturally captured by sigmoid normalization, where each attention weight is computed independently and can take any value between 0 and 1.
+
+The sigmoid function itself has strong biological roots, as it closely approximates the activation function of biological neurons. The smooth, differentiable nature of the sigmoid function enables gradient-based learning while maintaining the bounded output range that prevents numerical instabilities. This biological plausibility makes sigmoid normalization particularly suitable for memory systems that aim to model human cognitive processes.
+
+\subsection{Computational Efficiency Considerations}
+
+Sigmoid normalization offers significant computational advantages over softmax normalization. The computation of sigmoid values requires only a single exponential operation per element, while softmax requires computing exponentials for all elements followed by a normalization step. This difference becomes particularly important in large-scale systems where attention mechanisms operate over many memory slots or sequence positions.
+
+The independence of sigmoid values also enables more efficient parallel computation, as each attention weight can be computed independently without requiring knowledge of other weights. This parallelizability is crucial for GPU acceleration and can significantly improve training and inference speed in large neural networks.
+
+\subsection{Alternative Normalization Strategies}
+
+Beyond the traditional softmax-sigmoid dichotomy, several alternative normalization strategies can provide different trade-offs between computational efficiency and representational power. **Average normalization** divides the sum of sigmoid values by the number of elements, providing bounded outputs while maintaining independence: $\text{avg\_norm}(x_i) = \sigma(x_i) / \frac{1}{N}\sum_{j=1}^N \sigma(x_j)$.
+
+**Variance-stabilized normalization** divides by the square root of the number of elements to maintain bounded variance, similar to the scaling used in attention mechanisms: $\text{var\_norm}(x_i) = \sigma(x_i) / \sqrt{N}$. This approach ensures that the variance of the normalized values remains constant regardless of the sequence length, preventing the attention weights from becoming too small in long sequences.
+
+**Learnable normalization** introduces a learnable parameter that can adapt the normalization strength during training: $\text{learnable\_norm}(x_i) = \sigma(x_i) / \alpha$, where $\alpha$ is a learnable parameter. This approach allows the model to learn the optimal normalization strategy for its specific task and data distribution.
+
+\subsection{Attention Mechanism Normalization}
+
+In traditional attention mechanisms, softmax normalization serves to create a probability distribution over the attention targets. However, this normalization constraint may not always be necessary or beneficial. The exponential function in the numerator of softmax can be replaced by any positive, bounded function without fundamentally changing the attention mechanism's behavior.
+
+**Sigmoid-based attention** replaces the exponential function with sigmoid: $A_{ij} = \sigma(s_{ij}) / \sum_k \sigma(s_{ik})$, where $s_{ij}$ are the raw attention scores. This approach maintains the probability distribution property while using the more biologically plausible sigmoid function.
+
+**Independent attention weights** eliminate the normalization constraint entirely, using sigmoid values directly: $A_{ij} = \sigma(s_{ij})$. This approach allows for more flexible attention patterns where the total attention strength can vary based on the input context, potentially enabling more sophisticated attention behaviors.
+
+\subsection{Memory System Normalization}
+
+In memory systems, the choice of normalization strategy can significantly impact the system's ability to learn and adapt. **Importance weighting** in memory retrieval can benefit from sigmoid normalization, as it allows for independent assessment of each memory slot's relevance without requiring the weights to sum to unity.
+
+**Memory update gating** can also benefit from sigmoid normalization, as it enables independent control over each memory slot's update strength. This independence is particularly important in sophisticated memory systems where different memory slots may require different update strategies based on their content and relevance.
+
+\subsection{Practical Implementation Considerations}
+
+The implementation of alternative normalization strategies requires careful consideration of numerical stability and computational efficiency. **Numerical stability** can be maintained by using the log-sum-exp trick for softmax alternatives or by ensuring that sigmoid values are computed with sufficient precision.
+
+**Gradient flow** must be preserved to enable effective learning. Sigmoid normalization provides smooth gradients that facilitate learning, while alternative normalization strategies may require additional care to ensure that gradients flow properly through the normalization operation.
+
+**Memory efficiency** is another important consideration, particularly in large-scale systems. Sigmoid normalization requires less memory than softmax normalization, as it does not require storing intermediate normalization values. This memory efficiency can be crucial in systems with limited memory resources.
+
+\subsection{Experimental Validation}
+
+The choice of normalization strategy should be validated through empirical experimentation. **Ablation studies** can compare different normalization strategies on the same task to determine which approach provides the best performance for the specific application.
+
+**Computational profiling** can measure the actual performance differences between normalization strategies, taking into account both computational cost and memory usage. This profiling should be performed on the target hardware to ensure that the theoretical advantages translate to practical benefits.
+
+**Biological plausibility testing** can evaluate whether sigmoid-based normalization produces more human-like attention and memory patterns. This evaluation can be performed through behavioral experiments or by comparing the learned representations to those observed in biological systems.
+
+\subsection{Future Directions}
+
+The exploration of alternative normalization strategies opens several promising research directions. **Adaptive normalization** could allow the system to learn the optimal normalization strategy for different contexts or tasks. **Hierarchical normalization** could apply different normalization strategies at different levels of the memory hierarchy.
+
+**Biological validation** could provide insights into which normalization strategies best match human cognitive processes, potentially leading to more biologically plausible artificial intelligence systems. **Theoretical analysis** could provide deeper understanding of the mathematical properties of different normalization strategies and their implications for learning and generalization.
+
+The choice of normalization strategy represents a fundamental design decision that can significantly impact the performance and biological plausibility of memory and attention systems. While traditional approaches have relied heavily on softmax normalization, the biological and computational advantages of sigmoid normalization suggest that alternative approaches may provide better solutions for many applications.
 
 \end{document}
