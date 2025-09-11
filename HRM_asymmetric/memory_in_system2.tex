@@ -171,7 +171,7 @@ When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sop
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi,h} V_{h,ij} \\
+R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi,h} V_{ij,h} \\
 W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -226,7 +226,7 @@ The memory decay mechanism simulates the natural forgetting process observed in 
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M}_{\text{decayed}} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M}_{\text{decayed}} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
 W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -366,7 +366,7 @@ When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophis
 \begin{align}
 \mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
 W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -459,7 +459,7 @@ The importance-weighted representative mechanism replaces the simple "first toke
 \begin{align}
 \mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times 1 \times D} \times \mathbb{R}^{B \times 1 \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{r}_{\text{imp}} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{ij,h} \\
 W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -1416,5 +1416,53 @@ All three strategies require \textbf{persistent memory storage} during training:
 Without persistent storage, there would be no memory to retrieve or update, making the entire memory mechanism non-functional.
 
 The unified framework demonstrates that memory update sophistication lies on a continuum, where each strategy represents a different point balancing computational cost, biological plausibility, and representational power for memory storage and consolidation.
+
+\section{Appendix E: Temporal Memory Decay and Relative Position Dynamics}
+
+This appendix explores the reformulation of memory decay mechanisms from static decay factors to dynamic, position-dependent decay functions that better model biological memory processes and enable more sophisticated temporal reasoning in neural architectures.
+
+\subsection{From Static to Relative Decay}
+
+Traditional memory decay mechanisms employ static decay factors $\alpha_i \in [0,1]$ that remain constant throughout the sequence. While computationally efficient, this approach fails to capture the fundamental temporal dynamics of human memory, where forgetting rates depend on the temporal distance between memory formation and retrieval. Recent advances in positional encoding research have demonstrated that relative position information can significantly enhance long-context modeling capabilities.
+
+The reformulation introduces **relative position decay** where memory strength depends on the temporal distance between memory formation and current processing. Let $t$ represent the current sequence position and $t_i$ denote the position where memory slot $i$ was last updated. The decay function becomes $\alpha(t, t_i) = \alpha(|t - t_i|)$, where the decay rate depends on the relative temporal distance $\Delta t = |t - t_i|$.
+
+This temporal formulation enables several biologically plausible decay patterns. **Exponential decay** models the rapid initial forgetting observed in human memory: $\alpha(\Delta t) = \exp(-\lambda \Delta t)$, where $\lambda$ controls the decay rate. **Power law decay** captures the long-tail forgetting patterns characteristic of semantic memory: $\alpha(\Delta t) = (1 + \Delta t)^{-\beta}$, where $\beta$ determines the decay exponent. **Sigmoid decay** provides a more gradual transition between short-term and long-term memory: $\alpha(\Delta t) = 1 / (1 + \exp(\gamma(\Delta t - \tau)))$, where $\gamma$ controls the transition steepness and $\tau$ determines the transition point.
+
+\subsection{Integration with Positional Encoding Research}
+
+Recent work in positional encoding has revealed important insights about the relationship between position and memory in transformer architectures. The **3D Rotary Position Encoding (3D-RPE)** \cite{3d-rpe2024} extends traditional 2D RoPE by mapping positional encodings onto a three-dimensional sphere, enabling controllable long-term decay within specified chunk sizes. This approach demonstrates that explicit decay mechanisms can be integrated into attention-based architectures while maintaining computational efficiency.
+
+The **High-frequency rotary Position Encoding (HoPE)** \cite{hope2024} challenges the traditional long-term decay assumption in positional encodings by replacing specific components with position-independent ones. While HoPE removes decay constraints to enhance context awareness, it highlights the importance of understanding how temporal dynamics affect memory retrieval in long sequences.
+
+**Retentive Networks** \cite{retnet2023} incorporate decay directly into the attention mechanism through exponential decay masks, providing a different approach to temporal memory modeling. The attention mask in Retentive Networks applies exponential decay based on relative position: $A_{ij} = \exp(-\gamma |i - j|)$, where $\gamma$ controls the decay rate. This approach demonstrates that decay mechanisms can be effectively integrated into attention-based architectures without requiring separate memory storage.
+
+\subsection{Physical Time Integration}
+
+The integration of physical wall-clock time introduces additional temporal dynamics that can enhance memory systems. By associating memory updates with physical timestamps, the system can model memory decay based on real-world temporal patterns rather than sequence position alone. This approach enables the modeling of memory consolidation processes that occur over extended periods, independent of sequence processing.
+
+Let $T_{\text{update}}^{(i)}$ represent the wall-clock time when memory slot $i$ was last updated, and $T_{\text{current}}$ denote the current processing time. The physical time decay function becomes $\alpha_{\text{physical}}(T_{\text{current}}, T_{\text{update}}^{(i)}) = \alpha(T_{\text{current}} - T_{\text{update}}^{(i)})$, where the decay depends on the actual temporal distance between updates.
+
+This physical time integration enables several sophisticated memory behaviors. **Circadian decay patterns** can model the influence of sleep-wake cycles on memory consolidation, where memories formed during different phases of the circadian rhythm exhibit different decay characteristics. **Context-dependent decay** can incorporate environmental factors such as stress levels, attention state, or emotional context that influence memory retention. **Multi-scale temporal dynamics** can simultaneously model both rapid forgetting (seconds to minutes) and long-term consolidation (hours to days) within the same memory system.
+
+\subsection{Hybrid Temporal Decay Models}
+
+The combination of sequence position and physical time enables hybrid decay models that capture both immediate contextual effects and long-term consolidation processes. The **dual-time decay function** combines both temporal scales: $\alpha_{\text{hybrid}}(t, T) = \alpha_{\text{sequence}}(t) \cdot \alpha_{\text{physical}}(T)$, where sequence-based decay captures immediate contextual forgetting and physical time decay models long-term consolidation.
+
+This hybrid approach allows the memory system to distinguish between **working memory decay** (rapid forgetting over sequence positions) and **episodic memory consolidation** (slower decay over physical time). The system can learn different decay parameters for different types of information, enabling sophisticated memory management that adapts to the temporal characteristics of the stored information.
+
+\subsection{Implementation Considerations}
+
+The implementation of relative position decay requires careful consideration of computational efficiency and memory management. **Precomputed decay tables** can store decay values for common temporal distances, reducing computational overhead during inference. **Adaptive decay scheduling** can adjust decay rates based on the current context or task requirements, enabling dynamic memory management.
+
+**Memory consolidation mechanisms** can periodically update decay parameters based on the importance and recency of stored information. This adaptive approach ensures that critical memories receive appropriate protection from decay while allowing less important information to fade naturally. The system can learn optimal decay schedules through gradient-based optimization, enabling task-specific memory management strategies.
+
+\subsection{Biological Plausibility and Future Directions}
+
+The relative position decay formulation provides a more biologically plausible model of memory processes than static decay factors. Human memory exhibits complex temporal dynamics that depend on both recency and importance, with different types of information following different forgetting curves. The proposed framework enables the modeling of these sophisticated temporal patterns within neural architectures.
+
+Future research directions include the investigation of **hierarchical temporal decay** where different memory layers exhibit different temporal characteristics, **context-dependent decay modulation** where external factors influence forgetting rates, and **adaptive consolidation** where the system learns optimal decay schedules for different types of information. These extensions would further enhance the biological plausibility and practical utility of temporal memory systems in neural architectures.
+
+The integration of relative position decay with existing positional encoding techniques and physical time dynamics represents a significant advancement in the development of biologically inspired memory systems for neural architectures. This approach provides a foundation for more sophisticated temporal reasoning capabilities that can enhance the performance of large language models and other sequence processing systems.
 
 \end{document}
