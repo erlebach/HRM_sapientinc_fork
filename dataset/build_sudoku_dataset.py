@@ -19,8 +19,8 @@ class DataProcessConfig(BaseModel):
     source_repo: str = "sapientinc/sudoku-extreme"
     output_dir: str = "data/sudoku-extreme-full"
 
-    subsample_size: Optional[int] = None
-    min_difficulty: Optional[int] = None
+    subsample_size: int | None = None
+    min_difficulty: int | None = None
     num_aug: int = 0
 
 

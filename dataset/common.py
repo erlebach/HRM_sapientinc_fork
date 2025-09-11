@@ -13,11 +13,11 @@ class PuzzleDatasetMetadata(pydantic.BaseModel):
     pad_id: int
     ignore_label_id: Optional[int]
     blank_identifier_id: int
-    
+
     vocab_size: int
     seq_len: int
     num_puzzle_identifiers: int
-    
+
     total_groups: int
     mean_puzzle_examples: float
 
@@ -26,7 +26,7 @@ class PuzzleDatasetMetadata(pydantic.BaseModel):
 
 def dihedral_transform(arr: np.ndarray, tid: int) -> np.ndarray:
     """8 dihedral symmetries by rotate, flip and mirror"""
-    
+
     if tid == 0:
         return arr  # identity
     elif tid == 1:
@@ -45,7 +45,7 @@ def dihedral_transform(arr: np.ndarray, tid: int) -> np.ndarray:
         return np.fliplr(np.rot90(arr, k=1))  # anti-diagonal reflection
     else:
         return arr
-    
-    
+
+
 def inverse_dihedral_transform(arr: np.ndarray, tid: int) -> np.ndarray:
     return dihedral_transform(arr, DIHEDRAL_INVERSE[tid])
