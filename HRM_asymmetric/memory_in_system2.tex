@@ -171,8 +171,8 @@ When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sop
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi} V_{h,ij} \\
-W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi,h} V_{h,ij} \\
+W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
 The multi-head attention mechanism transforms the input into three different representations: queries ($\mathbf{Q}$), keys ($\mathbf{K}$), and values ($\mathbf{V}$). Each head $h$ learns to attend to different types of relationships between the input and memory. The scaling factor $\sqrt{D/H}$ prevents the attention scores from becoming too large, maintaining stable gradients during training. The final output $\mathbf{R}_{\text{mem}}$ is a weighted combination of memory values, where the weights are determined by the learned attention patterns across all heads.
@@ -226,8 +226,8 @@ The memory decay mechanism simulates the natural forgetting process observed in 
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M}_{\text{decayed}} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M}_{\text{decayed}} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
-W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+W_{\text{ret},S,bsi,h} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
 The attention mechanism operates on the decayed memory, ensuring that the model's attention is influenced by the temporal relevance of stored information. This creates a dynamic memory system where older, less relevant memories have reduced influence on the current computation, while recent and important memories maintain their full impact.
@@ -366,8 +366,8 @@ When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophis
 \begin{align}
 \mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
-W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
+A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
 The memory attention mechanism computes how much each input token should attend to each memory slot, creating both an enhanced representation $\mathbf{A}_{\text{mem}}$ and attention weights $\mathbf{W}_{\text{attn},S}$. This allows the model to identify which memory slots are most relevant to the current input, providing a more nuanced understanding of memory relevance than simple similarity measures.
@@ -459,8 +459,8 @@ The importance-weighted representative mechanism replaces the simple "first toke
 \begin{align}
 \mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times 1 \times D} \times \mathbb{R}^{B \times 1 \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{r}_{\text{imp}} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
-W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right)
+A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right) V_{h,ij} \\
+W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k,h} K_{ik,h}}{\sqrt{D/H}}\right)
 \end{align}
 
 The attention-based memory interaction computes how much the importance-weighted representative should attend to each memory slot. This creates a sophisticated interaction pattern where the model can identify which memories are most relevant to the current important information, providing a more nuanced understanding of memory relationships than simple similarity measures.
