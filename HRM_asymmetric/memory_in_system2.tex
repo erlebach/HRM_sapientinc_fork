@@ -161,7 +161,7 @@ When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sop
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
-\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times (D/H) \times H}$: Query, key, value projection matrices
 \item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
 \item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
 \end{itemize}
@@ -170,8 +170,8 @@ When $\text{retrieval\_strategy} = \text{"attention"}$, the system employs a sop
 \item \textbf{Multi-Head Attention:}
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
-\text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{V}_v \\
-R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+\text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
+R_{\text{mem},bsj} &= \frac{1}{H}\sum_{h=1}^{H} \sum_{i=1}^{M} W_{\text{ret},S,bsi} V_{h,ij} \\
 W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -183,8 +183,7 @@ The multi-head attention mechanism transforms the input into three different rep
 R_{\text{mem},bsj} &= \frac{R_{\text{mem},bsj}}{\sqrt{\frac{1}{D}\sum_{k=1}^{D} R_{\text{mem},bsk}^2 + \epsilon}} \cdot w_j
 \end{align}
 
-RMS normalization stabilizes the retrieved memory representations by scaling each dimension based on the root mean square of the vector. This normalization technique, used in modern language models like LLaMA, provides better training stability compared to Layer Normalization while being computationally more efficient. The learnable scale parameter $w_j$ allows the model to adapt the normalization to the specific requirements of each dimension.
-where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
+RMS normalization stabilizes the retrieved memory representations by scaling each dimension based on the root mean square of the vector. This normalization technique, used in modern language models like LLaMA, provides better training stability compared to Layer Normalization while being computationally more efficient. The learnable scale parameter $w_j$ allows the model to adapt the normalization to the specific requirements of each dimension, where $w_j$ is the learnable scale parameter and $\epsilon = 10^{-5}$ is a small constant for numerical stability.
 
 \textbf{Asymptotic Complexity:} $O(B \cdot S \cdot D^2 + B \cdot S \cdot M \cdot D)$
 \begin{itemize}
@@ -208,7 +207,7 @@ When $\text{retrieval\_strategy} = \text{"sophisticated"}$, the system implement
 \textbf{Parameter Definitions:}
 \begin{itemize}
 \item $\boldsymbol{\alpha}_{\text{ret}} \in \mathbb{R}^{M}$: Learnable memory decay factors for retrieval
-\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times (D/H) \times H}$: Query, key, value projection matrices
 \item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
 \item $\mathbf{W}_{\text{imp}} \in \mathbb{R}^{D \times 1}$: Learnable importance projection matrix
 \item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
@@ -227,7 +226,7 @@ The memory decay mechanism simulates the natural forgetting process observed in 
 \begin{align}
 \mathbf{R}_{\text{mem}}, \mathbf{W}_{\text{ret},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}_{\text{decayed}}, \mathbf{M}_{\text{decayed}}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M}_{\text{decayed}} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M}_{\text{decayed}} \mathbf{W}_v \\
-R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+R_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
 W_{\text{ret},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -357,7 +356,7 @@ When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophis
 
 \textbf{Parameter Definitions:}
 \begin{itemize}
-\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times (D/H) \times H}$: Query, key, value projection matrices
 \item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
 \item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
 \end{itemize}
@@ -367,7 +366,7 @@ When $\text{update\_strategy} = \text{"attention"}$, the system employs a sophis
 \begin{align}
 \mathbf{A}_{\text{mem}}, \mathbf{W}_{\text{attn},S} &= \text{MultiHeadAttention}(\mathbf{x}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times S \times D} \times \mathbb{R}^{B \times S \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{x} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+A_{\text{mem},bsj} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
 W_{\text{attn},S,bsi} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{bsk} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
@@ -424,7 +423,7 @@ When $\text{update\_strategy} = \text{"sophisticated"}$, the system implements t
 \begin{itemize}
 \item $\boldsymbol{\alpha} \in \mathbb{R}^{M}$: Learnable memory decay factors
 \item $\mathbf{W}_{\text{imp}} \in \mathbb{R}^{D \times 1}$: Learnable importance projection matrix
-\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times D}$: Query, key, value projection matrices
+\item $\mathbf{W}_q, \mathbf{W}_k, \mathbf{W}_v \in \mathbb{R}^{D \times (D/H) \times H}$: Query, key, value projection matrices
 \item $\mathbf{W}_{\text{out}} \in \mathbb{R}^{D \times D}$: Output projection matrix
 \item $\mathbf{W}_{\text{gate}} \in \mathbb{R}^{D \times M}$: Learnable gate projection matrix
 \item $\mathbf{M} \in \mathbb{R}^{M \times D}$: Memory matrix (learnable parameter)
@@ -460,7 +459,7 @@ The importance-weighted representative mechanism replaces the simple "first toke
 \begin{align}
 \mathbf{A}_{\text{soph}}, \mathbf{W}_{\text{soph},S} &= \text{MultiHeadAttention}(\mathbf{r}_{\text{imp}}, \mathbf{M}, \mathbf{M}) \in \mathbb{R}^{B \times 1 \times D} \times \mathbb{R}^{B \times 1 \times M} \\
 \text{where: } \mathbf{Q} &= \mathbf{r}_{\text{imp}} \mathbf{W}_q, \quad \mathbf{K} = \mathbf{M} \mathbf{W}_k, \quad \mathbf{V} = \mathbf{M} \mathbf{W}_v \\
-A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right) V_{ij} \\
+A_{\text{soph},b1j} &= \sum_{h=1}^{H} \sum_{i=1}^{M} \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right) V_{h,ij} \\
 W_{\text{soph},S,b1i} &= \text{softmax}\left(\frac{\sum_{k=1}^{D} Q_{b1k} K_{ik}}{\sqrt{D/H}}\right)
 \end{align}
 
