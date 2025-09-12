@@ -41,6 +41,7 @@ from pathlib import Path
 
 import yaml
 from hrm_model import create_hrm_model
+from utils.sudoku_augmentation import shuffle_4x4_sudoku
 
 
 # Add this configuration loading function
@@ -270,9 +271,7 @@ def generate_augmented_samples(
     Returns:
         List of (augmented_puzzle, augmented_solution, aug_name) tuples
     """
-    # Import the augmentation function
-    from dataset.build_4x4_sudoku_dataset import shuffle_4x4_sudoku
-
+    # Use the imported function (no local import needed)
     samples = []
     for i in range(num_augmentations):
         aug_puzzle, aug_solution = shuffle_4x4_sudoku(input_puzzle, target_solution)
