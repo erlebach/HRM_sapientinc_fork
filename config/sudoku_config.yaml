@@ -29,7 +29,7 @@ training:
   learning_rate: 0.0001  # 1e-4 as float
   weight_decay: 0.01
   device: "cpu"
-  save_dir: "checkpoints_4x4"
+  save_dir: "checkpoints_4x4_xx"
   log_file: "training_log.txt"
 
 # Evaluation Configuration

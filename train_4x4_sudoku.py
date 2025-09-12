@@ -413,3 +413,4 @@ if __name__ == "__main__":
         save_dir="./checkpoints_4x4",
         device="cpu",
     )
+
