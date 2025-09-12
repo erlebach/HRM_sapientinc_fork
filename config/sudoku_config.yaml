@@ -1,0 +1,48 @@
+# 4x4 Sudoku HRM Configuration
+
+# Dataset Configuration
+dataset:
+  data_dir: "dataset/data/sudoku-4x4"
+  train_size: 1000
+  val_size: 200
+  test_size: 200
+  num_augmentations: 3
+
+# Model Configuration
+model:
+  vocab_size: 5
+  hidden_size: 256
+  num_heads: 8
+  intermediate_size: 1024
+  max_seq_len: 16
+  num_puzzle_ids: 1
+  h_layers: 3
+  l_layers: 3
+  h_cycles: 2
+  l_cycles: 2
+  halt_max_steps: 8
+
+# Training Configuration
+training:
+  num_epochs: 50
+  batch_size: 8
+  learning_rate: 0.0001  # 1e-4 as float
+  weight_decay: 0.01
+  device: "cpu"
+  save_dir: "checkpoints_4x4"
+  log_file: "training_log.txt"
+
+# Evaluation Configuration
+evaluation:
+  use_voting: true
+  num_augmentations: 20
+  show_examples_after: true
+  num_examples: 5
+
+# Data Generation Configuration (for build_4x4_sudoku_dataset.py)
+data_generation:
+  output_dir: "data/sudoku-4x4"
+  train_size: 1000
+  val_size: 200
+  test_size: 200
+  num_aug: 3

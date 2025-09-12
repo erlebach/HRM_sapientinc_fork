@@ -37,7 +37,25 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 sys.path.append("HRM_didactic")
+from pathlib import Path
+
+import yaml
 from hrm_model import create_hrm_model
+
+
+# Add this configuration loading function
+def load_config(config_path: str = "config/sudoku_config.yaml") -> Dict[str, Any]:
+    """Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Dictionary containing configuration
+    """
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config
 
 
 class Sudoku4x4Dataset(Dataset):
@@ -538,71 +556,71 @@ def show_examples(
 
 
 def train_model(
-    data_dir: str = "dataset/data/sudoku-4x4",
-    num_epochs: int = 10,
-    batch_size: int = 8,
-    learning_rate: float = 1e-4,
-    save_dir: str = "./checkpoints_4x4",
-    device: str = "cpu",
-    show_examples_after: bool = True,
-    log_file: str = "training_log.txt",
+    config: Dict[str, Any],
+    config_path: str = "config/sudoku_config.yaml",
 ) -> None:
-    """Train HRM model on 4x4 sudoku.
+    """Train HRM model on 4x4 sudoku using configuration.
 
     Args:
-        data_dir: Directory containing the dataset
-        num_epochs: Number of training epochs
-        batch_size: Batch size for training
-        learning_rate: Learning rate for optimizer
-        save_dir: Directory to save checkpoints
-        device: Device to train on
-        show_examples_after: Whether to show example predictions after training
+        config: Configuration dictionary
+        config_path: Path to configuration file (for logging)
     """
+    # Extract configuration sections
+    dataset_cfg = config["dataset"]
+    model_cfg = config["model"]
+    training_cfg = config["training"]
+    eval_cfg = config["evaluation"]
+
     print("=" * 60)
     print("4x4 Sudoku HRM Training")
     print("=" * 60)
-    print(f"Device: {device}")
-    print(f"Epochs: {num_epochs}")
-    print(f"Batch size: {batch_size}")
-    print(f"Learning rate: {learning_rate}")
-    print(f"Data directory: {data_dir}")
-    print(f"Save directory: {save_dir}")
+    print(f"Config file: {config_path}")
+    print(f"Device: {training_cfg['device']}")
+    print(f"Epochs: {training_cfg['num_epochs']}")
+    print(f"Batch size: {training_cfg['batch_size']}")
+    print(f"Learning rate: {training_cfg['learning_rate']}")
+    print(f"Data directory: {dataset_cfg['data_dir']}")
+    print(f"Save directory: {training_cfg['save_dir']}")
+    print(f"Use voting: {eval_cfg['use_voting']}")
+    print(f"Voting augmentations: {eval_cfg['num_augmentations']}")
     print()
 
     # Create save directory
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(training_cfg["save_dir"], exist_ok=True)
 
     # Create data loaders
     print("Loading dataset...")
-    train_loader, val_loader, test_loader = create_data_loaders(data_dir, batch_size)
-    print(f"Train batches: {len(train_loader)}")
-    print(f"Val batches: {len(val_loader)}")
-    print(f"Test batches: {len(test_loader)}")
-    print()
-
-    # Create model (small for CPU training)
-    print("Creating model...")
-    model = create_hrm_model(
-        vocab_size=5,  # 0-4 for 4x4 sudoku
-        hidden_size=128,  # Small hidden size
-        num_heads=4,  # Fewer heads
-        intermediate_size=256,  # Smaller intermediate
-        max_seq_len=16,  # 4x4 = 16
-        num_puzzle_ids=1,  # Single puzzle type
-        h_layers=2,  # Fewer layers
-        l_layers=2,
-        h_cycles=1,  # Fewer cycles
-        l_cycles=1,
-        halt_max_steps=4,  # Fewer max steps
+    train_loader, val_loader, test_loader = create_data_loaders(
+        dataset_cfg["data_dir"], training_cfg["batch_size"]
     )
 
-    model = model.to(device)
+    # Create model using configuration
+    print("Creating model...")
+    model = create_hrm_model(
+        vocab_size=model_cfg["vocab_size"],
+        hidden_size=model_cfg["hidden_size"],
+        num_heads=model_cfg["num_heads"],
+        intermediate_size=model_cfg["intermediate_size"],
+        max_seq_len=model_cfg["max_seq_len"],
+        num_puzzle_ids=model_cfg["num_puzzle_ids"],
+        h_layers=model_cfg["h_layers"],
+        l_layers=model_cfg["l_layers"],
+        h_cycles=model_cfg["h_cycles"],
+        l_cycles=model_cfg["l_cycles"],
+        halt_max_steps=model_cfg["halt_max_steps"],
+    )
+
+    model = model.to(training_cfg["device"])
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model parameters: {total_params:,}")
     print()
 
     # Create optimizer
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=training_cfg["learning_rate"],
+        weight_decay=training_cfg["weight_decay"],
+    )
 
     # Training loop
     best_val_loss = float("inf")
@@ -610,29 +628,32 @@ def train_model(
     val_losses = []
     val_accuracies = []
 
-    # Open log file in unbuffered mode
-    log_path = os.path.join(save_dir, log_file)
-    with open(
-        log_path, "w", buffering=1
-    ) as log_f:  # Line buffered (unbuffered per line)
+    # Open log file
+    log_path = os.path.join(training_cfg["save_dir"], training_cfg["log_file"])
+    with open(log_path, "w", buffering=1) as log_f:
         log_f.write(
             "Epoch,Train_Loss,Val_Loss,Val_Exact_Accuracy,Val_Cell_Accuracy,Time\n"
         )
-        log_f.flush()  # Force write to disk
+        log_f.flush()
 
         print("Starting training...")
         print()
 
-        for epoch in range(1, num_epochs + 1):
+        for epoch in range(1, training_cfg["num_epochs"] + 1):
             start_time = time.time()
 
             # Train
-            train_metrics = train_epoch(model, train_loader, optimizer, device, epoch)
+            train_metrics = train_epoch(
+                model, train_loader, optimizer, training_cfg["device"], epoch
+            )
 
-            # Validate
-            # original behavior: use_voting=False
+            # Validate with voting configuration
             val_metrics = evaluate(
-                model, val_loader, device, use_voting=True, num_augmentations=20
+                model,
+                val_loader,
+                training_cfg["device"],
+                use_voting=eval_cfg["use_voting"],
+                num_augmentations=eval_cfg["num_augmentations"],
             )
 
             # Update best model
@@ -647,7 +668,7 @@ def train_model(
                         "val_exact_accuracy": val_metrics["val_exact_accuracy"],
                         "val_cell_accuracy": val_metrics["val_cell_accuracy"],
                     },
-                    os.path.join(save_dir, "best_model.pt"),
+                    os.path.join(training_cfg["save_dir"], "best_model.pt"),
                 )
 
             # Save checkpoint
@@ -660,7 +681,7 @@ def train_model(
                     "val_exact_accuracy": val_metrics["val_exact_accuracy"],
                     "val_cell_accuracy": val_metrics["val_cell_accuracy"],
                 },
-                os.path.join(save_dir, f"checkpoint_epoch_{epoch}.pt"),
+                os.path.join(training_cfg["save_dir"], f"checkpoint_epoch_{epoch}.pt"),
             )
 
             # Track losses and accuracies
@@ -681,7 +702,7 @@ def train_model(
 
             # Print progress
             print(
-                f"Epoch {epoch:2d}/{num_epochs} | "
+                f"Epoch {epoch:2d}/{training_cfg['num_epochs']} | "
                 f"Train Loss: {train_metrics['train_loss']:.4f} | "
                 f"Val Loss: {val_metrics['val_loss']:.4f} | "
                 f"Val Acc: {val_metrics['val_exact_accuracy']:.4f} | "
@@ -697,7 +718,11 @@ def train_model(
         # Final evaluation
         print("Final evaluation on test set...")
         test_metrics = evaluate(
-            model, test_loader, device, use_voting=True, num_augmentations=20
+            model,
+            test_loader,
+            training_cfg["device"],
+            use_voting=eval_cfg["use_voting"],
+            num_augmentations=eval_cfg["num_augmentations"],
         )
         print(f"Test Loss: {test_metrics['val_loss']:.4f}")
         print(f"Test LM Loss: {test_metrics['val_lm_loss']:.4f}")
@@ -716,13 +741,15 @@ def train_model(
         log_f.flush()
 
         # Show examples
-        if show_examples_after:
-            show_examples(model, test_loader, device, num_examples=5)
+        if eval_cfg["show_examples_after"]:
+            show_examples(
+                model, test_loader, training_cfg["device"], eval_cfg["num_examples"]
+            )
 
         print("Training complete!")
         print(f"Best validation loss: {best_val_loss:.4f}")
         print(f"Best validation accuracy: {max(val_accuracies):.4f}")
-        print(f"Model saved to: {save_dir}")
+        print(f"Model saved to: {training_cfg['save_dir']}")
         print(f"Training log saved to: {log_path}")
 
 
@@ -730,58 +757,74 @@ def main():
     """Main function with command line argument parsing."""
     parser = argparse.ArgumentParser(description="Train HRM on 4x4 Sudoku")
     parser.add_argument(
+        "--config",
+        type=str,
+        default="config/sudoku_config.yaml",
+        help="Path to YAML configuration file (default: config/sudoku_config.yaml)",
+    )
+    parser.add_argument(
         "--data_dir",
         type=str,
-        default="dataset/data/sudoku-4x4",
-        help="Directory containing the dataset",
+        help="Override data directory from config",
     )
     parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of training epochs"
+        "--epochs",
+        type=int,
+        help="Override number of epochs from config",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=8, help="Batch size for training"
+        "--batch_size",
+        type=int,
+        help="Override batch size from config",
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=1e-4, help="Learning rate"
-    )
-    parser.add_argument("--device", type=str, default="cpu", help="Device to use")
-    parser.add_argument(
-        "--save_dir",
-        type=str,
-        default="checkpoints_4x4",
-        help="Directory to save checkpoints",
+        "--learning_rate",
+        type=float,
+        help="Override learning rate from config",
     )
     parser.add_argument(
-        "--no_examples", action="store_true", help="Don't show example predictions"
+        "--use_voting",
+        action="store_true",
+        help="Override to enable voting",
     )
     parser.add_argument(
-        "--log_file", type=str, default="training_log.txt", help="Log file name"
+        "--no_voting",
+        action="store_true",
+        help="Override to disable voting",
     )
 
     args = parser.parse_args()
 
-    # Set random seeds for reproducibility
+    # Load configuration
+    config = load_config(args.config)
+
+    # Apply command line overrides
+    if args.data_dir:
+        config["dataset"]["data_dir"] = args.data_dir
+    if args.epochs:
+        config["training"]["num_epochs"] = args.epochs
+    if args.batch_size:
+        config["training"]["batch_size"] = args.batch_size
+    if args.learning_rate:
+        config["training"]["learning_rate"] = args.learning_rate
+    if args.use_voting:
+        config["evaluation"]["use_voting"] = True
+    if args.no_voting:
+        config["evaluation"]["use_voting"] = False
+
+    # Set random seeds
     torch.manual_seed(42)
     np.random.seed(42)
 
     # Check if data directory exists
-    if not os.path.exists(args.data_dir):
-        print(f"Error: Data directory {args.data_dir} does not exist!")
+    if not os.path.exists(config["dataset"]["data_dir"]):
+        print(f"Error: Data directory {config['dataset']['data_dir']} does not exist!")
         print("Please run the dataset generation first:")
         print("python dataset/build_4x4_sudoku_dataset.py")
         return
 
     # Train the model
-    train_model(
-        data_dir=args.data_dir,
-        num_epochs=args.epochs,
-        batch_size=args.batch_size,
-        learning_rate=args.learning_rate,
-        save_dir=args.save_dir,
-        device=args.device,
-        show_examples_after=not args.no_examples,
-        log_file=args.log_file,
-    )
+    train_model(config, args.config)
 
 
 if __name__ == "__main__":
