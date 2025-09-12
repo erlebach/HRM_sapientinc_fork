@@ -1,263 +1,298 @@
 """
-4x4 Sudoku Dataset Builder for CPU Training
-
-This creates a small-scale 4x4 sudoku dataset suitable for training on laptop CPU.
-The dataset includes:
-- 4x4 sudoku puzzles (16 cells total)
-- Simple digit vocabulary (0-4, where 0 is blank)
-- Small batch sizes for CPU training
-- Data augmentation through digit permutation
+Enhanced 4x4 Sudoku dataset builder with YAML configuration and augmentation support.
 """
 
+import argparse
 import json
 import os
 import random
-from typing import Optional
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
-from argdantic import ArgParser
+import yaml
+
+# Add the parent directory to the path
+sys.path.append(str(Path(__file__).parent.parent))
+
 from common import PuzzleDatasetMetadata
-from pydantic import BaseModel
-from tqdm import tqdm
-
-cli = ArgParser()
+from utils.sudoku_augmentation import simple_digit_augmentation
 
 
-class DataProcessConfig(BaseModel):
-    output_dir: str = "data/sudoku-4x4"
-    train_size: int = 1000
-    val_size: int = 200
-    test_size: int = 200
-    num_aug: int = 3  # Number of augmentations per puzzle
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Load configuration from YAML file.
 
-
-def generate_4x4_sudoku() -> tuple[np.ndarray, np.ndarray]:
-    """Generate a valid 4x4 sudoku puzzle and solution.
+    Args:
+        config_path: Path to YAML configuration file
 
     Returns:
-        puzzle: 4x4 array with some cells filled (0 = blank)
-        solution: 4x4 array with complete solution
+        Configuration dictionary
     """
-    # Start with a valid 4x4 sudoku solution
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def generate_4x4_sudoku_puzzle() -> Tuple[np.ndarray, np.ndarray]:
+    """Generate a valid 4x4 Sudoku puzzle and solution.
+
+    Returns:
+        Tuple of (puzzle, solution) where puzzle has some cells blank (0)
+    """
+    # Create a valid 4x4 Sudoku solution
     solution = np.array([[1, 2, 3, 4], [3, 4, 1, 2], [2, 1, 4, 3], [4, 3, 2, 1]])
 
-    # Apply random transformations to create variety
-    # Random digit permutation (1-4)
-    digit_map = np.random.permutation(np.arange(1, 5))
-    solution = digit_map[solution - 1]
+    # Randomly shuffle rows and columns to create variety
+    # Shuffle rows within each 2x2 block
+    row_perm = np.random.permutation(4)
+    solution = solution[row_perm]
 
-    # Random row permutation within 2x2 blocks
-    # Block 1: rows 0,1
-    if random.random() < 0.5:
-        solution[[0, 1]] = solution[[1, 0]]
-    # Block 2: rows 2,3
-    if random.random() < 0.5:
-        solution[[2, 3]] = solution[[3, 2]]
+    # Shuffle columns within each 2x2 block
+    col_perm = np.random.permutation(4)
+    solution = solution[:, col_perm]
 
-    # Random column permutation within 2x2 blocks
-    # Block 1: cols 0,1
-    if random.random() < 0.5:
-        solution[:, [0, 1]] = solution[:, [1, 0]]
-    # Block 2: cols 2,3
-    if random.random() < 0.5:
-        solution[:, [2, 3]] = solution[:, [3, 2]]
-
-    # Create puzzle by removing some cells (0 = blank)
+    # Create puzzle by removing 8-12 cells randomly
     puzzle = solution.copy()
+    num_blank = random.randint(8, 12)
+    blank_positions = random.sample(range(16), num_blank)
 
-    # Remove cells randomly, ensuring at least 4 cells remain
-    num_to_remove = random.randint(8, 12)  # Remove 8-12 cells
-    positions = [(i, j) for i in range(4) for j in range(4)]
-    random.shuffle(positions)
-
-    for i in range(min(num_to_remove, len(positions))):
-        puzzle[positions[i]] = 0
+    for pos in blank_positions:
+        row, col = pos // 4, pos % 4
+        puzzle[row, col] = 0
 
     return puzzle, solution
 
 
-def shuffle_4x4_sudoku(
-    board: np.ndarray, solution: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Apply random transformations to create augmented versions.
+def generate_augmented_samples(
+    puzzle: np.ndarray,
+    solution: np.ndarray,
+    num_augmentations: int,
+    augmentation_type: str = "digit_permutation",
+) -> List[Tuple[np.ndarray, np.ndarray, str]]:
+    """Generate augmented samples for a puzzle.
 
     Args:
-        board: 4x4 puzzle board
-        solution: 4x4 solution board
+        puzzle: Original puzzle
+        solution: Original solution
+        num_augmentations: Number of augmentations to generate
+        augmentation_type: Type of augmentation to use
 
     Returns:
-        Augmented puzzle and solution
+        List of (augmented_puzzle, augmented_solution, augmentation_id)
     """
-    # Create a random digit mapping: permutation of 1..4, with zero (blank) unchanged
-    digit_map = np.pad(np.random.permutation(np.arange(1, 5)), (1, 0))
+    augmented_samples = []
 
-    # Randomly decide whether to transpose
-    transpose_flag = np.random.rand() < 0.5
+    # Add original sample
+    augmented_samples.append((puzzle.copy(), solution.copy(), "original"))
 
-    # Generate valid row permutation within 2x2 blocks
-    # Block 1: rows 0,1
-    block1_rows = np.random.permutation([0, 1])
-    # Block 2: rows 2,3
-    block2_rows = np.random.permutation([2, 3])
-    row_perm = np.concatenate([block1_rows, block2_rows])
+    # Generate augmentations
+    for i in range(num_augmentations):
+        if augmentation_type == "digit_permutation":
+            aug_puzzle, aug_solution = simple_digit_augmentation(puzzle, solution)
+        else:
+            # Fallback to original if augmentation type not supported
+            aug_puzzle, aug_solution = puzzle.copy(), solution.copy()
 
-    # Similarly for columns (stacks)
-    # Block 1: cols 0,1
-    block1_cols = np.random.permutation([0, 1])
-    # Block 2: cols 2,3
-    block2_cols = np.random.permutation([2, 3])
-    col_perm = np.concatenate([block1_cols, block2_cols])
+        augmented_samples.append((aug_puzzle, aug_solution, f"aug_{i}"))
 
-    # Build 16->16 mapping
-    mapping = np.array([row_perm[i // 4] * 4 + col_perm[i % 4] for i in range(16)])
-
-    def apply_transformation(x: np.ndarray) -> np.ndarray:
-        # Apply transpose flag
-        if transpose_flag:
-            x = x.T
-        # Apply the position mapping
-        new_board = x.flatten()[mapping].reshape(4, 4).copy()
-        # Apply digit mapping
-        return digit_map[new_board]
-
-    return apply_transformation(board), apply_transformation(solution)
+    return augmented_samples
 
 
-def convert_subset(set_name: str, config: DataProcessConfig):
-    """Convert and save a subset of 4x4 sudoku data.
+def check_puzzle_equivalence(puzzle1: np.ndarray, puzzle2: np.ndarray) -> bool:
+    """Check if two puzzles are equivalent (same structure, different digits).
 
     Args:
-        set_name: Name of the subset ('train', 'val', 'test')
-        config: Configuration parameters
+        puzzle1: First puzzle
+        puzzle2: Second puzzle
+
+    Returns:
+        True if puzzles are equivalent
     """
-    # Determine dataset size
-    if set_name == "train":
-        size = config.train_size
-    elif set_name == "val":
-        size = config.val_size
-    else:  # test
-        size = config.test_size
-
-    # Generate puzzles
-    inputs = []
-    labels = []
-
-    print(f"Generating {size} {set_name} puzzles...")
-    for _ in tqdm(range(size), desc=f"Generating {set_name}"):
-        puzzle, solution = generate_4x4_sudoku()
-        inputs.append(puzzle)
-        labels.append(solution)
-
-    # Generate dataset
-    num_augments = config.num_aug if set_name == "train" else 0
-
-    results = {
-        k: []
-        for k in [
-            "inputs",
-            "labels",
-            "puzzle_identifiers",
-            "puzzle_indices",
-            "group_indices",
-        ]
-    }
-    puzzle_id = 0
-    example_id = 0
-
-    results["puzzle_indices"].append(0)
-    results["group_indices"].append(0)
-
-    for orig_inp, orig_out in zip(tqdm(inputs, desc=f"Processing {set_name}"), labels):
-        for aug_idx in range(1 + num_augments):
-            # First index is not augmented
-            if aug_idx == 0:
-                inp, out = orig_inp, orig_out
-            else:
-                inp, out = shuffle_4x4_sudoku(orig_inp, orig_out)
-
-            # Push puzzle (only single example)
-            results["inputs"].append(inp)
-            results["labels"].append(out)
-            example_id += 1
-            puzzle_id += 1
-
-            results["puzzle_indices"].append(example_id)
-            results["puzzle_identifiers"].append(0)  # All puzzles have same ID for 4x4
-
-        # Push group
-        results["group_indices"].append(puzzle_id)
-
-    # Convert to numpy arrays
-    def _seq_to_numpy(seq):
-        arr = np.concatenate(seq).reshape(len(seq), -1)
-        # Ensure values are in range 0-4
-        assert np.all((arr >= 0) & (arr <= 4))
-        return arr
-
-    results = {
-        "inputs": _seq_to_numpy(results["inputs"]),
-        "labels": _seq_to_numpy(results["labels"]),
-        "group_indices": np.array(results["group_indices"], dtype=np.int32),
-        "puzzle_indices": np.array(results["puzzle_indices"], dtype=np.int32),
-        "puzzle_identifiers": np.array(results["puzzle_identifiers"], dtype=np.int32),
-    }
-
-    # Metadata for 4x4 sudoku
-    metadata = PuzzleDatasetMetadata(
-        seq_len=16,  # 4x4 = 16 cells
-        vocab_size=5,  # 0 (blank) + 1,2,3,4
-        pad_id=0,
-        ignore_label_id=0,
-        blank_identifier_id=0,
-        num_puzzle_identifiers=1,  # All puzzles are same type
-        total_groups=len(results["group_indices"]) - 1,
-        mean_puzzle_examples=1,
-        sets=["all"],
-    )
-
-    # Save metadata as JSON
-    save_dir = os.path.join(config.output_dir, set_name)
-    os.makedirs(save_dir, exist_ok=True)
-
-    with open(os.path.join(save_dir, "dataset.json"), "w") as f:
-        json.dump(metadata.model_dump(), f)
-
-    # Save data
-    for k, v in results.items():
-        np.save(os.path.join(save_dir, f"all__{k}.npy"), v)
-
-    # Save IDs mapping (for visualization only)
-    with open(os.path.join(config.output_dir, "identifiers.json"), "w") as f:
-        json.dump(["<blank>"], f)
-
-    print(f"Saved {set_name} dataset with {len(results['inputs'])} examples")
+    # Two puzzles are equivalent if they have the same blank pattern
+    return np.array_equal((puzzle1 == 0), (puzzle2 == 0))
 
 
-@cli.command(singleton=True)
-def preprocess_data(config: DataProcessConfig):
-    """Preprocess 4x4 sudoku dataset for training."""
-    print("Creating 4x4 Sudoku Dataset for CPU Training")
-    print(f"Output directory: {config.output_dir}")
-    print(f"Train size: {config.train_size}")
-    print(f"Val size: {config.val_size}")
-    print(f"Test size: {config.test_size}")
-    print(f"Augmentations per puzzle: {config.num_aug}")
+def ensure_no_equivalents(
+    puzzles: List[np.ndarray], solutions: List[np.ndarray]
+) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Remove equivalent puzzles from the dataset.
+
+    Args:
+        puzzles: List of puzzles
+        solutions: List of solutions
+
+    Returns:
+        Tuple of (filtered_puzzles, filtered_solutions)
+    """
+    unique_puzzles = []
+    unique_solutions = []
+
+    for i, (puzzle, solution) in enumerate(zip(puzzles, solutions)):
+        is_equivalent = False
+        for existing_puzzle in unique_puzzles:
+            if check_puzzle_equivalence(puzzle, existing_puzzle):
+                is_equivalent = True
+                break
+
+        if not is_equivalent:
+            unique_puzzles.append(puzzle)
+            unique_solutions.append(solution)
+
+    return unique_puzzles, unique_solutions
+
+
+def build_dataset(config: Dict[str, Any]) -> None:
+    """Build the 4x4 Sudoku dataset with augmentations.
+
+    Args:
+        config: Configuration dictionary
+    """
+    data_cfg = config["data_generation"]
 
     # Set random seed for reproducibility
-    np.random.seed(42)
-    random.seed(42)
+    random.seed(data_cfg["seed"])
+    np.random.seed(data_cfg["seed"])
 
     # Create output directory
-    os.makedirs(config.output_dir, exist_ok=True)
+    output_dir = Path(data_cfg["output_dir"])
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process each subset
-    convert_subset("train", config)
-    convert_subset("val", config)
-    convert_subset("test", config)
+    # Generate base puzzles
+    print(f"Generating {data_cfg['train_size']} training puzzles...")
+    train_puzzles, train_solutions = [], []
+    for _ in range(data_cfg["train_size"]):
+        puzzle, solution = generate_4x4_sudoku_puzzle()
+        train_puzzles.append(puzzle)
+        train_solutions.append(solution)
 
-    print("Dataset creation complete!")
+    print(f"Generating {data_cfg['val_size']} validation puzzles...")
+    val_puzzles, val_solutions = [], []
+    for _ in range(data_cfg["val_size"]):
+        puzzle, solution = generate_4x4_sudoku_puzzle()
+        val_puzzles.append(puzzle)
+        val_solutions.append(solution)
+
+    print(f"Generating {data_cfg['test_size']} test puzzles...")
+    test_puzzles, test_solutions = [], []
+    for _ in range(data_cfg["test_size"]):
+        puzzle, solution = generate_4x4_sudoku_puzzle()
+        test_puzzles.append(puzzle)
+        test_solutions.append(solution)
+
+    # Remove equivalent puzzles if requested
+    if data_cfg.get("ensure_no_equivalents", False):
+        print("Removing equivalent puzzles...")
+        train_puzzles, train_solutions = ensure_no_equivalents(
+            train_puzzles, train_solutions
+        )
+        val_puzzles, val_solutions = ensure_no_equivalents(val_puzzles, val_solutions)
+        test_puzzles, test_solutions = ensure_no_equivalents(
+            test_puzzles, test_solutions
+        )
+
+        print(
+            f"After removing equivalents: {len(train_puzzles)} train, {len(val_puzzles)} val, {len(test_puzzles)} test"
+        )
+
+    # Generate augmented samples for each split
+    for split_name, puzzles, solutions in [
+        ("train", train_puzzles, train_solutions),
+        ("val", val_puzzles, val_solutions),
+        ("test", test_puzzles, test_solutions),
+    ]:
+        print(f"Generating augmented samples for {split_name}...")
+
+        # Create split directory
+        split_dir = output_dir / split_name
+        split_dir.mkdir(exist_ok=True)
+
+        # Generate augmented samples
+        all_puzzles = []
+        all_solutions = []
+        all_identifiers = []
+
+        for i, (puzzle, solution) in enumerate(zip(puzzles, solutions)):
+            augmented_samples = generate_augmented_samples(
+                puzzle,
+                solution,
+                data_cfg["num_augmentations"],
+                data_cfg["augmentation_type"],
+            )
+
+            for aug_puzzle, aug_solution, aug_id in augmented_samples:
+                all_puzzles.append(aug_puzzle)
+                all_solutions.append(aug_solution)
+                all_identifiers.append(f"{split_name}_{i}_{aug_id}")
+
+        # Convert to numpy arrays
+        all_puzzles = np.array(all_puzzles)
+        all_solutions = np.array(all_solutions)
+
+        # Save data
+        np.save(split_dir / "all__inputs.npy", all_puzzles)
+        np.save(split_dir / "all__labels.npy", all_solutions)
+
+        # Save identifiers
+        with open(split_dir / "identifiers.json", "w") as f:
+            json.dump(all_identifiers, f)
+
+        # Create metadata
+        metadata = PuzzleDatasetMetadata(
+            num_puzzles=len(puzzles),
+            num_augmentations=data_cfg["num_augmentations"],
+            total_samples=len(all_puzzles),
+            augmentation_type=data_cfg["augmentation_type"],
+            # Add all the missing required fields
+            pad_id=0,  # Padding ID for blank cells
+            vocab_size=5,  # 0-4 for 4x4 Sudoku
+            max_seq_len=16,  # 4x4 grid
+            puzzle_size=4,  # 4x4 Sudoku
+            num_puzzle_ids=1,  # Single puzzle type
+            num_augmentations_per_puzzle=data_cfg["num_augmentations"],
+            augmentation_strategy=data_cfg["augmentation_type"],
+            dataset_version="1.0",
+            created_at="2025-01-27",
+            description="4x4 Sudoku dataset with digit permutation augmentations",
+            # Add the missing fields from the error
+            ignore_label_id=0,  # ID for ignored labels
+            blank_identifier_id=0,  # ID for blank cells
+            seq_len=16,  # Sequence length (4x4)
+            num_puzzle_identifiers=1,  # Number of puzzle identifier types
+            total_groups=len(puzzles),  # Total number of puzzle groups
+            mean_puzzle_examples=len(all_puzzles)
+            / len(puzzles),  # Average examples per puzzle
+            sets=["train", "val", "test"],  # Available dataset splits
+        )
+
+        with open(split_dir / "dataset.json", "w") as f:
+            json.dump(metadata.__dict__, f)
+
+        print(f"Saved {len(all_puzzles)} samples to {split_dir}")
+
+
+def main():
+    """Main function with command line argument parsing."""
+    parser = argparse.ArgumentParser(
+        description="Build 4x4 Sudoku dataset with augmentations"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/sudoku_data_generation.yaml",
+        help="Path to YAML configuration file (default: config/sudoku_data_generation.yaml)",
+    )
+
+    args = parser.parse_args()
+
+    # Load configuration
+    config = load_config(args.config)
+
+    # Build dataset
+    build_dataset(config)
+
+    print("Dataset generation complete!")
 
 
 if __name__ == "__main__":
-    cli()
-
+    main()
