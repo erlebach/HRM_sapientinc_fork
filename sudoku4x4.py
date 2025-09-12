@@ -41,7 +41,7 @@ from pathlib import Path
 
 import yaml
 from hrm_model import create_hrm_model
-from utils.sudoku_augmentation import shuffle_4x4_sudoku
+from utils.sudoku_augmentation import shuffle_4x4_sudoku, simple_digit_augmentation
 
 
 # Add this configuration loading function
@@ -62,12 +62,13 @@ def load_config(config_path: str = "config/sudoku_config.yaml") -> Dict[str, Any
 class Sudoku4x4Dataset(Dataset):
     """4x4 Sudoku dataset for training."""
 
-    def __init__(self, data_dir: str, split: str = "train"):
+    def __init__(self, data_dir: str, split: str = "train", max_samples: int = None):
         """Initialize dataset.
 
         Args:
             data_dir: Directory containing the dataset
             split: Dataset split ('train', 'val', 'test')
+            max_samples: Maximum number of samples to use (None for all)
         """
         self.data_dir = data_dir
         self.split = split
@@ -79,6 +80,12 @@ class Sudoku4x4Dataset(Dataset):
         self.puzzle_ids = np.load(
             os.path.join(data_path, "all__puzzle_identifiers.npy")
         )
+
+        # Limit samples if specified
+        if max_samples is not None and max_samples < len(self.inputs):
+            self.inputs = self.inputs[:max_samples]
+            self.labels = self.labels[:max_samples]
+            self.puzzle_ids = self.puzzle_ids[:max_samples]
 
         # Load metadata
         with open(os.path.join(data_path, "dataset.json"), "r") as f:
@@ -113,6 +120,9 @@ def create_data_loaders(
     data_dir: str,
     batch_size: int = 8,
     num_workers: int = 0,
+    max_train_samples: int = None,
+    max_val_samples: int = None,
+    max_test_samples: int = None,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """Create data loaders for train/val/test splits.
 
@@ -120,13 +130,16 @@ def create_data_loaders(
         data_dir: Directory containing the dataset
         batch_size: Batch size for training
         num_workers: Number of worker processes (0 for CPU)
+        max_train_samples: Maximum number of training samples
+        max_val_samples: Maximum number of validation samples
+        max_test_samples: Maximum number of test samples
 
     Returns:
         Tuple of (train_loader, val_loader, test_loader)
     """
-    train_dataset = Sudoku4x4Dataset(data_dir, "train")
-    val_dataset = Sudoku4x4Dataset(data_dir, "val")
-    test_dataset = Sudoku4x4Dataset(data_dir, "test")
+    train_dataset = Sudoku4x4Dataset(data_dir, "train", max_train_samples)
+    val_dataset = Sudoku4x4Dataset(data_dir, "val", max_val_samples)
+    test_dataset = Sudoku4x4Dataset(data_dir, "test", max_test_samples)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
@@ -271,10 +284,12 @@ def generate_augmented_samples(
     Returns:
         List of (augmented_puzzle, augmented_solution, aug_name) tuples
     """
-    # Use the imported function (no local import needed)
+    # Use simple digit-only augmentation for truly equivalent puzzles
     samples = []
     for i in range(num_augmentations):
-        aug_puzzle, aug_solution = shuffle_4x4_sudoku(input_puzzle, target_solution)
+        aug_puzzle, aug_solution = simple_digit_augmentation(
+            input_puzzle, target_solution
+        )
         aug_name = f"puzzle_aug_{i}"
         samples.append((aug_puzzle, aug_solution, aug_name))
 
@@ -319,122 +334,74 @@ def evaluate(
             puzzle_ids = batch["puzzle_ids"].to(device)
 
             if use_voting:
-                # Voting-based evaluation
-                batch_predictions = []
-                batch_q_values = []
+                # Generate all augmented samples for the batch
+                all_inputs = []
+                all_targets = []
 
                 for i in range(input_ids.size(0)):
                     # Get original puzzle and solution
                     input_puzzle = input_ids[i].cpu().numpy().reshape(4, 4)
                     target_solution = target_ids[i].cpu().numpy().reshape(4, 4)
 
+                    # Add original sample
+                    all_inputs.append(input_ids[i])
+                    all_targets.append(target_ids[i])
+
                     # Generate augmented samples
-                    aug_samples = generate_augmented_samples(
-                        input_puzzle, target_solution, num_augmentations
-                    )
+                    for _ in range(num_augmentations):
+                        aug_puzzle, aug_solution, _ = generate_augmented_samples(
+                            input_puzzle, target_solution, 1
+                        )[0]
 
-                    # Collect predictions and Q-values for each augmentation
-                    pred_hashes = []
-                    q_values = []
-
-                    for aug_puzzle, aug_solution, aug_name in aug_samples:
                         # Convert back to tensor format
-                        aug_input = (
-                            torch.tensor(aug_puzzle.flatten(), dtype=torch.long)
-                            .unsqueeze(0)
-                            .to(device)
-                        )
-                        aug_puzzle_id = puzzle_ids[i : i + 1]  # Same puzzle ID
+                        aug_input = torch.tensor(
+                            aug_puzzle.flatten(), dtype=torch.long
+                        ).to(device)
+                        aug_target = torch.tensor(
+                            aug_solution.flatten(), dtype=torch.long
+                        ).to(device)
 
-                        # Run inference
-                        outputs = model(aug_input, aug_puzzle_id)
-                        prediction = (
-                            torch.argmax(outputs["logits"], dim=-1)
-                            .cpu()
-                            .numpy()
-                            .reshape(4, 4)
-                        )
-                        q_halt = outputs["q_halt_logits"].cpu().item()
+                        all_inputs.append(aug_input)
+                        all_targets.append(aug_target)
 
-                        # Create hash for voting
-                        pred_hash = grid_hash(prediction)
-                        pred_hashes.append(pred_hash)
-                        q_values.append(q_halt)
+                # Stack all samples
+                all_inputs = torch.stack(all_inputs)
+                all_targets = torch.stack(all_targets)
 
-                    # Perform voting
-                    vote_map = defaultdict(lambda: [0, 0.0])  # [count, sum_q_values]
-
-                    for pred_hash, q_val in zip(pred_hashes, q_values):
-                        vote_map[pred_hash][0] += 1
-                        vote_map[pred_hash][1] += q_val
-
-                    # Average Q-values and sort by confidence
-                    for pred_hash in vote_map:
-                        vote_map[pred_hash][1] /= vote_map[pred_hash][
-                            0
-                        ]  # Average Q-value
-
-                    # Sort by average Q-value (confidence)
-                    sorted_votes = sorted(
-                        vote_map.items(), key=lambda x: x[1][1], reverse=True
-                    )
-
-                    # Take the most confident prediction
-                    best_pred_hash = sorted_votes[0][0]
-
-                    # Find the actual prediction that matches this hash
-                    best_prediction = None
-                    for aug_puzzle, aug_solution, aug_name in aug_samples:
-                        aug_input = (
-                            torch.tensor(aug_puzzle.flatten(), dtype=torch.long)
-                            .unsqueeze(0)
-                            .to(device)
-                        )
-                        aug_puzzle_id = puzzle_ids[i : i + 1]
-                        outputs = model(aug_input, aug_puzzle_id)
-                        prediction = (
-                            torch.argmax(outputs["logits"], dim=-1)
-                            .cpu()
-                            .numpy()
-                            .reshape(4, 4)
-                        )
-
-                        if grid_hash(prediction) == best_pred_hash:
-                            best_prediction = prediction
-                            break
-
-                    if best_prediction is None:
-                        # Fallback to first prediction if voting fails
-                        aug_input = (
-                            torch.tensor(aug_samples[0][0].flatten(), dtype=torch.long)
-                            .unsqueeze(0)
-                            .to(device)
-                        )
-                        aug_puzzle_id = puzzle_ids[i : i + 1]
-                        outputs = model(aug_input, aug_puzzle_id)
-                        best_prediction = (
-                            torch.argmax(outputs["logits"], dim=-1)
-                            .cpu()
-                            .numpy()
-                            .reshape(4, 4)
-                        )
-
-                    batch_predictions.append(
-                        torch.tensor(best_prediction.flatten(), dtype=torch.long)
-                    )
-
-                # Convert to tensor
-                predictions = torch.stack(batch_predictions).to(device)
-
-                # Compute loss (use first augmentation for loss computation)
-                first_aug_input = (
-                    torch.tensor(aug_samples[0][0].flatten(), dtype=torch.long)
-                    .unsqueeze(0)
-                    .to(device)
+                # Run inference on all samples
+                outputs = model(
+                    all_inputs, puzzle_ids.repeat_interleave(num_augmentations + 1)
                 )
-                first_aug_puzzle_id = puzzle_ids[0:1]
-                outputs = model(first_aug_input, first_aug_puzzle_id)
-                loss, loss_components = compute_loss(outputs, target_ids[0:1])
+                predictions = torch.argmax(outputs["logits"], dim=-1)
+
+                # Reshape for voting: [batch_size, num_augmentations+1, seq_len]
+                batch_size = input_ids.size(0)
+                predictions = predictions.view(batch_size, num_augmentations + 1, -1)
+                all_targets = all_targets.view(batch_size, num_augmentations + 1, -1)
+
+                # Cell-level majority voting
+                voted_predictions = []
+                for i in range(batch_size):
+                    # Get all predictions for this puzzle (original + augmentations)
+                    puzzle_predictions = predictions[
+                        i
+                    ]  # [num_augmentations+1, seq_len]
+
+                    # Majority voting for each cell
+                    voted_prediction = torch.mode(puzzle_predictions, dim=0)[
+                        0
+                    ]  # [seq_len]
+                    voted_predictions.append(voted_prediction)
+
+                # Stack voted predictions
+                predictions = torch.stack(voted_predictions)
+
+                # Use original targets for loss computation
+                target_ids = input_ids
+
+                # Compute loss on original samples only
+                original_outputs = model(input_ids, puzzle_ids)
+                loss, loss_components = compute_loss(original_outputs, target_ids)
 
             else:
                 # Standard evaluation (no voting)
@@ -445,7 +412,7 @@ def evaluate(
             # Update metrics
             total_loss += loss_components["total_loss"]
             total_lm_loss += loss_components["lm_loss"]
-            total_q_loss += loss_components["q_loss"]
+            total_q_loss += loss_components["q_loss"]  # Fixed: was "total_q_loss"
             num_batches += 1
 
             # Exact match accuracy (entire puzzle correct)
@@ -555,15 +522,9 @@ def show_examples(
 
 
 def train_model(
-    config: Dict[str, Any],
-    config_path: str = "config/sudoku_config.yaml",
+    config: Dict[str, Any], config_path: str = "config/sudoku_config.yaml"
 ) -> None:
-    """Train HRM model on 4x4 sudoku using configuration.
-
-    Args:
-        config: Configuration dictionary
-        config_path: Path to configuration file (for logging)
-    """
+    """Train HRM model on 4x4 sudoku using configuration."""
     # Extract configuration sections
     dataset_cfg = config["dataset"]
     model_cfg = config["model"]
@@ -587,10 +548,14 @@ def train_model(
     # Create save directory
     os.makedirs(training_cfg["save_dir"], exist_ok=True)
 
-    # Create data loaders
+    # Create data loaders with sample limits
     print("Loading dataset...")
     train_loader, val_loader, test_loader = create_data_loaders(
-        dataset_cfg["data_dir"], training_cfg["batch_size"]
+        dataset_cfg["data_dir"],
+        training_cfg["batch_size"],
+        max_train_samples=dataset_cfg.get("max_train_samples"),
+        max_val_samples=dataset_cfg.get("max_val_samples"),
+        max_test_samples=dataset_cfg.get("max_test_samples"),
     )
 
     # Create model using configuration

@@ -2,8 +2,34 @@
 Sudoku augmentation utilities for voting mechanism.
 """
 
-import numpy as np
 import random
+
+import numpy as np
+
+
+def simple_digit_augmentation(
+    board: np.ndarray, solution: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply simple digit permutation augmentation.
+
+    Only permutes digits (1,2,3,4) while keeping 0 (blank) unchanged.
+    This preserves the spatial structure and should be truly equivalent.
+
+    Args:
+        board: 4x4 puzzle board
+        solution: 4x4 solution board
+
+    Returns:
+        Augmented puzzle and solution
+    """
+    # Create a random digit mapping: permutation of 1..4, with zero (blank) unchanged
+    digit_map = np.pad(np.random.permutation(np.arange(1, 5)), (1, 0))
+
+    # Apply digit mapping to both board and solution
+    aug_board = digit_map[board]
+    aug_solution = digit_map[solution]
+
+    return aug_board, aug_solution
 
 
 def shuffle_4x4_sudoku(

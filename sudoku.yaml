@@ -6,7 +6,10 @@ dataset:
   train_size: 1000
   val_size: 200
   test_size: 200
-  num_augmentations: 3
+  num_augmentations: 20
+  max_train_samples: 10     # NEW: Limit training samples (set to 10 for fast testing)
+  max_val_samples: 50       # NEW: Limit validation samples
+  max_test_samples: 50      # NEW: Limit test samples
 
 # Model Configuration
 model:
@@ -16,11 +19,11 @@ model:
   intermediate_size: 1024
   max_seq_len: 16
   num_puzzle_ids: 1
-  h_layers: 2
-  l_layers: 2
-  h_cycles: 1
-  l_cycles: 1
-  halt_max_steps: 2
+  h_layers: 3
+  l_layers: 3
+  h_cycles: 2
+  l_cycles: 2
+  halt_max_steps: 8
 
 # Training Configuration
 training:

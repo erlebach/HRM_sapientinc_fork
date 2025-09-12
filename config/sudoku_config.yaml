@@ -7,6 +7,9 @@ dataset:
   val_size: 200
   test_size: 200
   num_augmentations: 3
+  max_train_samples: 10     # NEW: Limit training samples (set to 10 for fast testing)
+  max_val_samples: 50       # NEW: Limit validation samples
+  max_test_samples: 50      # NEW: Limit test samples
 
 # Model Configuration
 model:
