@@ -162,3 +162,63 @@
 - Voting mechanism based on arc_eval.ipynb implementation
 - Ready for testing with current model and dataset
 - Should significantly improve exact accuracy while maintaining cell accuracy
+
+---
+
+## 2025-01-27 - Implemented Separate Batch Sizes for Training and Evaluation
+
+### Completed Tasks ✅
+- [x] Added separate batch size configuration for training vs evaluation
+- [x] Updated `sudoku_dataloader.py` to support `eval_batch_size` parameter
+- [x] Modified `create_dataloaders()` function to use different batch sizes
+- [x] Updated `create_evaluation_dataloader()` with `max_samples` parameter
+- [x] Enhanced configuration system to support evaluation batch size
+- [x] Improved debugging capabilities with batch size 1 for evaluation
+
+### Files Created/Modified
+- `dataset/sudoku_dataloader.py` - Added eval_batch_size parameter and updated functions ✅
+- `config/sudoku_config.yaml` - Added evaluation.batch_size configuration ✅
+- `JOURNAL.md` - Updated with recent changes
+- `SNAPSHOT.md` - Updated current project state
+
+### Key Changes
+- **Separate Batch Sizes**: Training uses batch size 8, evaluation uses batch size 1
+- **Enhanced Debugging**: Single sample evaluation makes debugging much easier
+- **Memory Efficiency**: Lower memory usage during evaluation
+- **Error Isolation**: Single sample processing prevents batch-level errors
+- **Configuration Flexibility**: Easy to adjust evaluation batch size independently
+
+### Technical Details
+- **Training Batch Size**: 8 (for efficient training)
+- **Evaluation Batch Size**: 1 (for clean debugging and error isolation)
+- **Function Updates**: `create_dataloaders()` now accepts `eval_batch_size` parameter
+- **Backward Compatibility**: Default evaluation batch size is 1
+- **Documentation**: Updated docstrings to reflect new parameters
+
+### Benefits
+- **Debugging**: Much easier to trace issues with single sample evaluation
+- **Memory**: Lower memory usage during evaluation
+- **Flexibility**: Can adjust evaluation batch size without affecting training
+- **Error Handling**: Single sample errors don't affect entire batch
+- **Voting Clarity**: Cleaner voting process with single samples
+
+### Configuration Updates
+```yaml
+# Training Configuration
+training:
+  batch_size: 8  # For efficient training
+
+# Evaluation Configuration  
+evaluation:
+  batch_size: 1  # For clean debugging
+  use_voting: true
+  num_augmentations: 20
+```
+
+### Notes
+- Evaluation batch size 1 makes debugging much more manageable
+- Training efficiency maintained with batch size 8
+- Ready to debug voting mechanism issues with single sample processing
+- Configuration system now supports independent batch size control
+
+---

@@ -122,6 +122,7 @@ class Sudoku4x4Dataset(Dataset):
 def create_data_loaders(
     data_dir: str,
     batch_size: int = 8,
+    eval_batch_size: int = 1,  # NEW: Add eval_batch_size parameter
     num_workers: int = 0,
     max_train_samples: int = None,
     max_val_samples: int = None,
@@ -132,6 +133,7 @@ def create_data_loaders(
     Args:
         data_dir: Directory containing the dataset
         batch_size: Batch size for training
+        eval_batch_size: Batch size for evaluation (val/test)
         num_workers: Number of worker processes (0 for CPU)
         max_train_samples: Maximum number of training samples
         max_val_samples: Maximum number of validation samples
@@ -148,10 +150,10 @@ def create_data_loaders(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        val_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        test_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
     )
 
     return train_loader, val_loader, test_loader
@@ -198,6 +200,21 @@ def compute_loss(
     }
 
 
+def compute_diagnostic_quantity(
+    predictions: torch.Tensor, targets: torch.Tensor
+) -> float:
+    """Compute a diagnostic quantity to verify training consistency.
+
+    Args:
+        predictions: Model predictions [batch_size, seq_len]
+        targets: Target values [batch_size, seq_len]
+
+    Returns:
+        Diagnostic quantity (sum of all prediction values)
+    """
+    return predictions.sum().item()
+
+
 def train_epoch(
     model: nn.Module,
     train_loader: DataLoader,
@@ -233,6 +250,14 @@ def train_epoch(
         # Forward pass
         optimizer.zero_grad()
         outputs = model(input_ids, puzzle_ids)
+
+        # ADD DEBUG STATEMENTS HERE
+        predictions = torch.argmax(outputs["logits"], dim=-1)
+        print(f"DEBUG: Training - Batch {batch_idx} predictions: {predictions[0]}")
+        print(f"DEBUG: Training - Batch {batch_idx} targets: {target_ids[0]}")
+        print(
+            f"DEBUG: Training - Batch {batch_idx} logits sample: {outputs['logits'][0, :5, :5]}"
+        )
 
         # Compute loss
         loss, loss_components = compute_loss(outputs, target_ids)
@@ -337,6 +362,11 @@ def evaluate(
             puzzle_ids = batch["puzzle_ids"].to(device)
 
             if use_voting:
+                # ADD DEBUG STATEMENTS HERE
+                print(f"DEBUG: Processing batch with {len(input_ids)} samples")
+                print(f"DEBUG: Input shape: {input_ids.shape}")
+                print(f"DEBUG: Target shape: {target_ids.shape}")
+
                 # Generate all augmented samples for the batch
                 all_inputs = []
                 all_targets = []
@@ -377,30 +407,46 @@ def evaluate(
                 )
                 predictions = torch.argmax(outputs["logits"], dim=-1)
 
-                # Reshape for voting: [batch_size, num_augmentations+1, seq_len]
+                # Check what the model predicts on the original samples (every 21st sample)
+                original_predictions = predictions[
+                    :: num_augmentations + 1
+                ]  # Every 21st sample
+                print(f"DEBUG: Original sample predictions: {original_predictions[0]}")
+                print(f"DEBUG: Original sample targets: {target_ids[0]}")
+
+                # Add debug statements before voting
+                print(f"DEBUG: Raw predictions shape: {predictions.shape}")
+                print(f"DEBUG: First few raw predictions: {predictions[:5]}")
+
+                # Reshape for voting
                 batch_size = input_ids.size(0)
                 predictions = predictions.view(batch_size, num_augmentations + 1, -1)
-                all_targets = all_targets.view(batch_size, num_augmentations + 1, -1)
+                print(f"DEBUG: Reshaped predictions shape: {predictions.shape}")
+                print(f"DEBUG: First puzzle predictions: {predictions[0]}")
 
                 # Cell-level majority voting
                 voted_predictions = []
                 for i in range(batch_size):
-                    # Get all predictions for this puzzle (original + augmentations)
                     puzzle_predictions = predictions[
                         i
                     ]  # [num_augmentations+1, seq_len]
+                    print(
+                        f"DEBUG: Puzzle {i} predictions shape: {puzzle_predictions.shape}"
+                    )
+                    print(
+                        f"DEBUG: Puzzle {i} first few predictions: {puzzle_predictions[:3]}"
+                    )
 
-                    # Majority voting for each cell
-                    voted_prediction = torch.mode(puzzle_predictions, dim=0)[
-                        0
-                    ]  # [seq_len]
+                    voted_prediction = torch.mode(puzzle_predictions, dim=0)[0]
+                    print(f"DEBUG: Puzzle {i} voted prediction: {voted_prediction}")
                     voted_predictions.append(voted_prediction)
 
                 # Stack voted predictions
                 predictions = torch.stack(voted_predictions)
+                print(f"DEBUG: Voting - First puzzle prediction: {predictions[0]}")
 
                 # Use original targets for loss computation
-                target_ids = input_ids
+                target_ids = input_ids  # This should be the original puzzle targets
 
                 # Compute loss on original samples only
                 original_outputs = model(input_ids, puzzle_ids)
@@ -411,6 +457,16 @@ def evaluate(
                 outputs = model(input_ids, puzzle_ids)
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
+                print(f"DEBUG: No-voting - First puzzle prediction: {predictions[0]}")
+
+                # ADD DEBUG STATEMENTS HERE
+                print(f"DEBUG: No voting - Input shape: {input_ids.shape}")
+                print(f"DEBUG: No voting - Target shape: {target_ids.shape}")
+                print(f"DEBUG: No voting - Predictions shape: {predictions.shape}")
+                print(f"DEBUG: No voting - First prediction: {predictions[0]}")
+                print(f"DEBUG: No voting - First target: {target_ids[0]}")
+                diagnostic = compute_diagnostic_quantity(predictions, target_ids)
+                print(f"DEBUG: No voting evaluation diagnostic: {diagnostic}")
 
             # Update metrics
             total_loss += loss_components["total_loss"]
@@ -553,10 +609,14 @@ def train_model(
 
     # Create data loaders based on configuration
     use_augmentations = config["training"].get("use_augmentations", True)
+    eval_batch_size = config["evaluation"].get(
+        "batch_size", 1
+    )  # NEW: Get eval batch size
 
     train_loader, val_loader = create_dataloaders(
         data_dir=dataset_cfg["data_dir"],
         batch_size=training_cfg["batch_size"],
+        eval_batch_size=eval_batch_size,  # NEW: Pass eval batch size
         max_train_samples=dataset_cfg.get("max_train_samples"),
         max_val_samples=dataset_cfg.get("max_val_samples"),
         use_augmentations=use_augmentations,
@@ -686,6 +746,11 @@ def train_model(
 
         # Final evaluation
         print("Final evaluation on test set...")
+        test_loader = create_evaluation_dataloader(
+            data_dir=dataset_cfg["data_dir"],
+            batch_size=eval_batch_size,  # NEW: Use eval batch size
+            max_test_samples=dataset_cfg.get("max_test_samples"),
+        )
         test_metrics = evaluate(
             model,
             test_loader,
