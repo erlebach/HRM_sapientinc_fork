@@ -253,11 +253,11 @@ def train_epoch(
 
         # ADD DEBUG STATEMENTS HERE
         predictions = torch.argmax(outputs["logits"], dim=-1)
-        print(f"DEBUG: Training - Batch {batch_idx} predictions: {predictions[0]}")
-        print(f"DEBUG: Training - Batch {batch_idx} targets: {target_ids[0]}")
-        print(
-            f"DEBUG: Training - Batch {batch_idx} logits sample: {outputs['logits'][0, :5, :5]}"
-        )
+        # print(f"DEBUG: Training - Batch {batch_idx} predictions: {predictions[0]}")
+        # print(f"DEBUG: Training - Batch {batch_idx} targets: {target_ids[0]}")
+        # print(
+        #     f"DEBUG: Training - Batch {batch_idx} logits sample: {outputs['logits'][0, :5, :5]}"
+        # )
 
         # Compute loss
         loss, loss_components = compute_loss(outputs, target_ids)
@@ -301,7 +301,7 @@ def inverse_aug_name(aug_name: str) -> str:
 
 def generate_augmented_samples(
     input_puzzle: np.ndarray, target_solution: np.ndarray, num_augmentations: int = 20
-) -> list[tuple[np.ndarray, np.ndarray, str]]:
+) -> list[tuple[np.ndarray, np.ndarray, str, np.ndarray]]:
     """Generate augmented samples for voting.
 
     Args:
@@ -310,16 +310,16 @@ def generate_augmented_samples(
         num_augmentations: Number of augmented samples to generate
 
     Returns:
-        List of (augmented_puzzle, augmented_solution, aug_name) tuples
+        List of (augmented_puzzle, augmented_solution, aug_name, digit_mapping) tuples
     """
     # Use simple digit-only augmentation for truly equivalent puzzles
     samples = []
     for i in range(num_augmentations):
-        aug_puzzle, aug_solution = simple_digit_augmentation(
+        aug_puzzle, aug_solution, digit_map = simple_digit_augmentation(
             input_puzzle, target_solution
         )
         aug_name = f"puzzle_aug_{i}"
-        samples.append((aug_puzzle, aug_solution, aug_name))
+        samples.append((aug_puzzle, aug_solution, aug_name, digit_map))
 
     return samples
 
@@ -358,97 +358,82 @@ def evaluate(
         for batch in tqdm(val_loader, desc="Evaluating"):
             # Move to device
             input_ids = batch["input_ids"].to(device)
-            target_ids = batch["target_ids"].to(device)
+            target_ids = batch["target_ids"].to(device)  # Keep original solutions
             puzzle_ids = batch["puzzle_ids"].to(device)
 
             if use_voting:
                 # ADD DEBUG STATEMENTS HERE
-                print(f"DEBUG: Processing batch with {len(input_ids)} samples")
-                print(f"DEBUG: Input shape: {input_ids.shape}")
-                print(f"DEBUG: Target shape: {target_ids.shape}")
+                # print(f"DEBUG: Processing batch with {len(input_ids)} samples")
+                # print(f"DEBUG: Input shape: {input_ids.shape}")
+                # print(f"DEBUG: Target shape: {target_ids.shape}")
 
                 # Generate all augmented samples for the batch
                 all_inputs = []
-                all_targets = []
+                all_inv_maps = []  # Store inverse digit mappings
+                vocab_size = 5  # 0, 1, 2, 3, 4
 
                 for i in range(input_ids.size(0)):
                     # Get original puzzle and solution
                     input_puzzle = input_ids[i].cpu().numpy().reshape(4, 4)
                     target_solution = target_ids[i].cpu().numpy().reshape(4, 4)
 
-                    # Add original sample
+                    # Add original sample (identity mapping)
                     all_inputs.append(input_ids[i])
-                    all_targets.append(target_ids[i])
+                    id_map = torch.arange(vocab_size, device=device)
+                    all_inv_maps.append(id_map)
 
                     # Generate augmented samples
                     for _ in range(num_augmentations):
-                        aug_puzzle, aug_solution, _ = generate_augmented_samples(
-                            input_puzzle, target_solution, 1
-                        )[0]
+                        aug_puzzle, aug_solution, aug_name, digit_map = (
+                            generate_augmented_samples(
+                                input_puzzle, target_solution, 1
+                            )[0]
+                        )
 
                         # Convert back to tensor format
                         aug_input = torch.tensor(
                             aug_puzzle.flatten(), dtype=torch.long
                         ).to(device)
-                        aug_target = torch.tensor(
-                            aug_solution.flatten(), dtype=torch.long
-                        ).to(device)
-
                         all_inputs.append(aug_input)
-                        all_targets.append(aug_target)
+
+                        # Create inverse mapping
+                        inv_map = torch.empty_like(
+                            torch.tensor(digit_map, device=device)
+                        )
+                        inv_map[torch.tensor(digit_map, device=device)] = torch.arange(
+                            vocab_size, device=device
+                        )
+                        all_inv_maps.append(inv_map)
 
                 # Stack all samples
                 all_inputs = torch.stack(all_inputs)
-                all_targets = torch.stack(all_targets)
 
                 # Run inference on all samples
                 outputs = model(
                     all_inputs, puzzle_ids.repeat_interleave(num_augmentations + 1)
                 )
-                predictions = torch.argmax(outputs["logits"], dim=-1)
+                logits = outputs["logits"]  # [batch*(A+1), seq_len, vocab]
 
-                # Check what the model predicts on the original samples (every 21st sample)
-                original_predictions = predictions[
-                    :: num_augmentations + 1
-                ]  # Every 21st sample
-                print(f"DEBUG: Original sample predictions: {original_predictions[0]}")
-                print(f"DEBUG: Original sample targets: {target_ids[0]}")
+                # Remap each augmented sample's logit channels back to original label space
+                remapped_logits = []
+                for k in range(logits.size(0)):
+                    inv_perm = all_inv_maps[k]  # [vocab]
+                    remapped_logits.append(logits[k, :, inv_perm])  # [seq_len, vocab]
+                remapped_logits = torch.stack(
+                    remapped_logits, dim=0
+                )  # [batch*(A+1), seq_len, vocab]
 
-                # Add debug statements before voting
-                print(f"DEBUG: Raw predictions shape: {predictions.shape}")
-                print(f"DEBUG: First few raw predictions: {predictions[:5]}")
-
-                # Reshape for voting
+                # Reshape and vote by logit summation
                 batch_size = input_ids.size(0)
-                predictions = predictions.view(batch_size, num_augmentations + 1, -1)
-                print(f"DEBUG: Reshaped predictions shape: {predictions.shape}")
-                print(f"DEBUG: First puzzle predictions: {predictions[0]}")
+                remapped_logits = remapped_logits.view(
+                    batch_size, num_augmentations + 1, -1, vocab_size
+                )
+                voted_logits = remapped_logits.sum(dim=1)  # [batch, seq_len, vocab]
+                predictions = voted_logits.argmax(dim=-1)  # [batch, seq_len]
 
-                # Cell-level majority voting
-                voted_predictions = []
-                for i in range(batch_size):
-                    puzzle_predictions = predictions[
-                        i
-                    ]  # [num_augmentations+1, seq_len]
-                    print(
-                        f"DEBUG: Puzzle {i} predictions shape: {puzzle_predictions.shape}"
-                    )
-                    print(
-                        f"DEBUG: Puzzle {i} first few predictions: {puzzle_predictions[:3]}"
-                    )
+                # print(f"DEBUG: Voting - First puzzle prediction: {predictions[0]}")
 
-                    voted_prediction = torch.mode(puzzle_predictions, dim=0)[0]
-                    print(f"DEBUG: Puzzle {i} voted prediction: {voted_prediction}")
-                    voted_predictions.append(voted_prediction)
-
-                # Stack voted predictions
-                predictions = torch.stack(voted_predictions)
-                print(f"DEBUG: Voting - First puzzle prediction: {predictions[0]}")
-
-                # Use original targets for loss computation
-                target_ids = input_ids  # This should be the original puzzle targets
-
-                # Compute loss on original samples only
+                # Compute loss on original samples only (using original targets)
                 original_outputs = model(input_ids, puzzle_ids)
                 loss, loss_components = compute_loss(original_outputs, target_ids)
 
@@ -457,24 +442,24 @@ def evaluate(
                 outputs = model(input_ids, puzzle_ids)
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
-                print(f"DEBUG: No-voting - First puzzle prediction: {predictions[0]}")
+                # print(f"DEBUG: No-voting - First puzzle prediction: {predictions[0]}")
 
                 # ADD DEBUG STATEMENTS HERE
-                print(f"DEBUG: No voting - Input shape: {input_ids.shape}")
-                print(f"DEBUG: No voting - Target shape: {target_ids.shape}")
-                print(f"DEBUG: No voting - Predictions shape: {predictions.shape}")
-                print(f"DEBUG: No voting - First prediction: {predictions[0]}")
-                print(f"DEBUG: No voting - First target: {target_ids[0]}")
-                diagnostic = compute_diagnostic_quantity(predictions, target_ids)
-                print(f"DEBUG: No voting evaluation diagnostic: {diagnostic}")
+                # print(f"DEBUG: No voting - Input shape: {input_ids.shape}")
+                # print(f"DEBUG: No voting - Target shape: {target_ids.shape}")
+                # print(f"DEBUG: No voting - Predictions shape: {predictions.shape}")
+                # print(f"DEBUG: No voting - First prediction: {predictions[0]}")
+                # print(f"DEBUG: No voting - First target: {target_ids[0]}")
+                # diagnostic = compute_diagnostic_quantity(predictions, target_ids)
+                # print(f"DEBUG: No voting evaluation diagnostic: {diagnostic}")
 
             # Update metrics
             total_loss += loss_components["total_loss"]
             total_lm_loss += loss_components["lm_loss"]
-            total_q_loss += loss_components["q_loss"]  # Fixed: was "total_q_loss"
+            total_q_loss += loss_components["q_loss"]
             num_batches += 1
 
-            # Exact match accuracy (entire puzzle correct)
+            # Exact match accuracy (entire puzzle correct) - compare voted predictions to true solutions
             exact_match = torch.all(predictions == target_ids, dim=1)
             exact_matches += exact_match.sum().item()
 
