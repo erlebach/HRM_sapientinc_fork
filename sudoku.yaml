@@ -6,7 +6,7 @@ dataset:
   train_size: 1000
   val_size: 200
   test_size: 200
-  num_augmentations: 2
+  num_augmentations: 20
   max_train_samples: 1000    # NEW: Limit training samples (set to 10 for fast testing)
   max_val_samples: 200      # NEW: Limit validation samples
   max_test_samples: 200
@@ -34,8 +34,8 @@ training:
   warmup_steps: 100 # not used
   max_grad_norm: 1.0 # not used
   use_augmentations: true  # NEW: Control augmentation usage
-  device: "cpu"
-  save_dir: "checkpoints_4x4_yy"
+  device: "mps"
+  save_dir: "checkpoints_4x4_zz1"
   log_file: "training_log.txt"
 
 # Evaluation Configuration

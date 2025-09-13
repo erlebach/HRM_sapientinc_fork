@@ -56,108 +56,7 @@ def load_config(config_path: str = "config/sudoku_config.yaml") -> dict[str, Any
     return config
 
 
-class Sudoku4x4Dataset(Dataset):
-    """4x4 Sudoku dataset for training."""
-
-    def __init__(
-        self,
-        data_dir: str,
-        split: str = "train",
-        max_samples: int | None = None,
-    ) -> None:
-        """Initialize dataset.
-
-        Args:
-            data_dir: Directory containing the dataset
-            split: Dataset split ('train', 'val', 'test')
-            max_samples: Maximum number of samples to use (None for all)
-        """
-        self.data_dir = data_dir
-        self.split = split
-
-        # Load data
-        data_path = Path(data_dir) / split
-        # puzzles
-        self.inputs = np.load(data_path / "all__inputs.npy")
-        # solutions
-        self.labels = np.load(data_path / "all__labels.npy")
-        # puzzle groups (load from pickle file)
-        with Path(data_path / "all__puzzle_identifiers.pkl").open("rb") as f:
-            self.puzzle_ids = pickle.load(f)
-
-        # Limit samples if specified
-        if max_samples is not None and max_samples < len(self.inputs):
-            self.inputs = self.inputs[:max_samples]
-            self.labels = self.labels[:max_samples]
-            self.puzzle_ids = self.puzzle_ids[:max_samples]
-
-        # Load metadata
-        with Path(data_path / "dataset.json", "r").open() as f:
-            self.metadata = json.load(f)
-
-        print(f"Loaded {split} dataset: {len(self.inputs)} examples")
-        print(f"Sequence length: {self.metadata['seq_len']}")
-        print(f"Vocabulary size: {self.metadata['vocab_size']}")
-        print(f"Sample input: {self.inputs[0]}")
-        print(f"Sample label: {self.labels[0]}")
-
-    def __len__(self) -> int:
-        return len(self.inputs)
-
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        """Get a single example.
-
-        Returns:
-            Dictionary containing:
-            - input_ids: Input puzzle [seq_len]
-            - target_ids: Target solution [seq_len]
-            - puzzle_ids: Puzzle identifier [1]
-        """
-        return {
-            "input_ids": torch.tensor(self.inputs[idx], dtype=torch.long),
-            "target_ids": torch.tensor(self.labels[idx], dtype=torch.long),
-            "puzzle_ids": torch.tensor(self.puzzle_ids[idx], dtype=torch.long),
-        }
-
-
-# def create_data_loaders(
-#     data_dir: str,
-#     batch_size: int = 8,
-#     eval_batch_size: int = 1,  # NEW: Add eval_batch_size parameter
-#     num_workers: int = 0,
-#     max_train_samples: int | None = None,
-#     max_val_samples: int | None = None,
-#     max_test_samples: int | None = None,
-# ) -> tuple[DataLoader, DataLoader, DataLoader]:
-#     """Create data loaders for train/val/test splits.
-
-#     Args:
-#         data_dir: Directory containing the dataset
-#         batch_size: Batch size for training
-#         eval_batch_size: Batch size for evaluation (val/test)
-#         num_workers: Number of worker processes (0 for CPU)
-#         max_train_samples: Maximum number of training samples
-#         max_val_samples: Maximum number of validation samples
-#         max_test_samples: Maximum number of test samples
-
-#     Returns:
-#         Tuple of (train_loader, val_loader, test_loader)
-#     """
-#     train_dataset = Sudoku4x4Dataset(data_dir, "train", max_train_samples)
-#     val_dataset = Sudoku4x4Dataset(data_dir, "val", max_val_samples)
-#     test_dataset = Sudoku4x4Dataset(data_dir, "test", max_test_samples)
-
-#     train_loader = DataLoader(
-#         train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
-#     )
-#     val_loader = DataLoader(
-#         val_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
-#     )
-#     test_loader = DataLoader(
-#         test_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
-#     )
-
-#     return train_loader, val_loader, test_loader
+# Remove the old Sudoku4x4Dataset class since we're using the new dataloader
 
 
 def compute_loss(
@@ -734,8 +633,9 @@ def train_model(
         print("Final evaluation on test set...")
         test_loader = create_evaluation_dataloader(
             data_dir=dataset_cfg["data_dir"],
+            split="test",
             batch_size=eval_batch_size,  # NEW: Use eval batch size
-            max_test_samples=dataset_cfg.get("max_test_samples"),
+            max_samples=dataset_cfg.get("max_test_samples"),
         )
         test_metrics = evaluate(
             model,
