@@ -20,7 +20,13 @@ def simple_digit_augmentation(
         solution: 4x4 solution board
 
     Returns:
-        Augmented puzzle, solution, and digit mapping
+        tuple containing:
+            - aug_board: Augmented puzzle board with permuted digits
+            - aug_solution: Augmented solution board with permuted digits
+            - digit_map: 5-element array mapping original digits to new digits
+                        Index 0 maps to 0 (preserves blanks)
+                        Indices 1-4 map to a random permutation of [1,2,3,4]
+                        Example: [0, 3, 1, 4, 2] means 0→0, 1→3, 2→1, 3→4, 4→2
     """
     # Create a random digit mapping: permutation of 1..4, with zero (blank) unchanged
     digit_map = np.pad(np.random.permutation(np.arange(1, 5)), (1, 0))

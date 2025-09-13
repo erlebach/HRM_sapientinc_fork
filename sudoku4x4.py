@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-4x4 Sudoku HRM Training Script
+"""4x4 Sudoku HRM Training Script.
 
 This script reads the 4x4 sudoku dataset files and trains the HRM model.
 It provides a complete training pipeline optimized for CPU training.
@@ -21,34 +20,29 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
 
 # Import HRM model from didactic implementation
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-
-sys.path.append("HRM_didactic")
-from pathlib import Path
-
 import yaml
 
 # Add import
 from dataset.sudoku_dataloader import create_dataloaders, create_evaluation_dataloader
-from hrm_model import create_hrm_model
+from HRM_didactic.hrm_model import create_hrm_model
+from torch import nn, optim
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 from utils.sudoku_augmentation import shuffle_4x4_sudoku, simple_digit_augmentation
 
 
 # Add this configuration loading function
-def load_config(config_path: str = "config/sudoku_config.yaml") -> Dict[str, Any]:
+def load_config(config_path: str = "config/sudoku_config.yaml") -> dict[str, Any]:
     """Load configuration from YAML file.
 
     Args:
@@ -57,7 +51,7 @@ def load_config(config_path: str = "config/sudoku_config.yaml") -> Dict[str, Any
     Returns:
         Dictionary containing configuration
     """
-    with open(config_path, "r") as f:
+    with Path(config_path).open() as f:
         config = yaml.safe_load(f)
     return config
 
@@ -65,7 +59,12 @@ def load_config(config_path: str = "config/sudoku_config.yaml") -> Dict[str, Any
 class Sudoku4x4Dataset(Dataset):
     """4x4 Sudoku dataset for training."""
 
-    def __init__(self, data_dir: str, split: str = "train", max_samples: int = None):
+    def __init__(
+        self,
+        data_dir: str,
+        split: str = "train",
+        max_samples: int | None = None,
+    ) -> None:
         """Initialize dataset.
 
         Args:
@@ -77,12 +76,14 @@ class Sudoku4x4Dataset(Dataset):
         self.split = split
 
         # Load data
-        data_path = os.path.join(data_dir, split)
-        self.inputs = np.load(os.path.join(data_path, "all__inputs.npy"))
-        self.labels = np.load(os.path.join(data_path, "all__labels.npy"))
-        self.puzzle_ids = np.load(
-            os.path.join(data_path, "all__puzzle_identifiers.npy")
-        )
+        data_path = Path(data_dir) / split
+        # puzzles
+        self.inputs = np.load(data_path / "all__inputs.npy")
+        # solutions
+        self.labels = np.load(data_path / "all__labels.npy")
+        # puzzle groups (load from pickle file)
+        with Path(data_path / "all__puzzle_identifiers.pkl").open("rb") as f:
+            self.puzzle_ids = pickle.load(f)
 
         # Limit samples if specified
         if max_samples is not None and max_samples < len(self.inputs):
@@ -91,7 +92,7 @@ class Sudoku4x4Dataset(Dataset):
             self.puzzle_ids = self.puzzle_ids[:max_samples]
 
         # Load metadata
-        with open(os.path.join(data_path, "dataset.json"), "r") as f:
+        with Path(data_path / "dataset.json", "r").open() as f:
             self.metadata = json.load(f)
 
         print(f"Loaded {split} dataset: {len(self.inputs)} examples")
@@ -103,7 +104,7 @@ class Sudoku4x4Dataset(Dataset):
     def __len__(self) -> int:
         return len(self.inputs)
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
         """Get a single example.
 
         Returns:
@@ -119,52 +120,52 @@ class Sudoku4x4Dataset(Dataset):
         }
 
 
-def create_data_loaders(
-    data_dir: str,
-    batch_size: int = 8,
-    eval_batch_size: int = 1,  # NEW: Add eval_batch_size parameter
-    num_workers: int = 0,
-    max_train_samples: int = None,
-    max_val_samples: int = None,
-    max_test_samples: int = None,
-) -> Tuple[DataLoader, DataLoader, DataLoader]:
-    """Create data loaders for train/val/test splits.
+# def create_data_loaders(
+#     data_dir: str,
+#     batch_size: int = 8,
+#     eval_batch_size: int = 1,  # NEW: Add eval_batch_size parameter
+#     num_workers: int = 0,
+#     max_train_samples: int | None = None,
+#     max_val_samples: int | None = None,
+#     max_test_samples: int | None = None,
+# ) -> tuple[DataLoader, DataLoader, DataLoader]:
+#     """Create data loaders for train/val/test splits.
 
-    Args:
-        data_dir: Directory containing the dataset
-        batch_size: Batch size for training
-        eval_batch_size: Batch size for evaluation (val/test)
-        num_workers: Number of worker processes (0 for CPU)
-        max_train_samples: Maximum number of training samples
-        max_val_samples: Maximum number of validation samples
-        max_test_samples: Maximum number of test samples
+#     Args:
+#         data_dir: Directory containing the dataset
+#         batch_size: Batch size for training
+#         eval_batch_size: Batch size for evaluation (val/test)
+#         num_workers: Number of worker processes (0 for CPU)
+#         max_train_samples: Maximum number of training samples
+#         max_val_samples: Maximum number of validation samples
+#         max_test_samples: Maximum number of test samples
 
-    Returns:
-        Tuple of (train_loader, val_loader, test_loader)
-    """
-    train_dataset = Sudoku4x4Dataset(data_dir, "train", max_train_samples)
-    val_dataset = Sudoku4x4Dataset(data_dir, "val", max_val_samples)
-    test_dataset = Sudoku4x4Dataset(data_dir, "test", max_test_samples)
+#     Returns:
+#         Tuple of (train_loader, val_loader, test_loader)
+#     """
+#     train_dataset = Sudoku4x4Dataset(data_dir, "train", max_train_samples)
+#     val_dataset = Sudoku4x4Dataset(data_dir, "val", max_val_samples)
+#     test_dataset = Sudoku4x4Dataset(data_dir, "test", max_test_samples)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
-    )
-    test_loader = DataLoader(
-        test_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
-    )
+#     train_loader = DataLoader(
+#         train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers
+#     )
+#     val_loader = DataLoader(
+#         val_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
+#     )
+#     test_loader = DataLoader(
+#         test_dataset, batch_size=eval_batch_size, shuffle=False, num_workers=num_workers
+#     )
 
-    return train_loader, val_loader, test_loader
+#     return train_loader, val_loader, test_loader
 
 
 def compute_loss(
-    outputs: Dict[str, torch.Tensor],
+    outputs: dict[str, torch.Tensor],
     targets: torch.Tensor,
     lm_weight: float = 1.0,
     q_weight: float = 0.1,
-) -> Tuple[torch.Tensor, Dict[str, float]]:
+) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute combined loss for HRM model.
 
     Args:
@@ -221,7 +222,7 @@ def train_epoch(
     optimizer: optim.Optimizer,
     device: torch.device,
     epoch: int,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Train for one epoch.
 
     Args:
@@ -330,7 +331,7 @@ def evaluate(
     device: torch.device,
     use_voting: bool = True,
     num_augmentations: int = 20,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Evaluate model on validation set with optional voting.
 
     Args:
@@ -566,7 +567,7 @@ def show_examples(
 
 
 def train_model(
-    config: Dict[str, Any], config_path: str = "config/sudoku_config.yaml"
+    config: dict[str, Any], config_path: str = "config/sudoku_config.yaml"
 ) -> None:
     """Train HRM model on 4x4 sudoku using configuration."""
     # Extract configuration sections

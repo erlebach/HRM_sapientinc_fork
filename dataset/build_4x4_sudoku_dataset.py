@@ -6,6 +6,7 @@ This is the file to use to build the dataset.
 import argparse
 import json
 import os
+import pickle
 import random
 import sys
 from pathlib import Path
@@ -70,7 +71,7 @@ def generate_augmented_samples(
     solution: np.ndarray,
     num_augmentations: int,
     augmentation_type: str = "digit_permutation",
-) -> list[tuple[np.ndarray, np.ndarray, str]]:
+) -> list[tuple[np.ndarray, np.ndarray, str, np.ndarray]]:
     """Generate augmented samples for a puzzle.
 
     Args:
@@ -80,22 +81,26 @@ def generate_augmented_samples(
         augmentation_type: Type of augmentation to use
 
     Returns:
-        list of (augmented_puzzle, augmented_solution, augmentation_id)
+        list of (augmented_puzzle, augmented_solution, augmentation_id, digit_map)
     """
     augmented_samples = []
 
-    # Add original sample
-    augmented_samples.append((puzzle.copy(), solution.copy(), "original"))
+    # Add original sample with identity mapping
+    identity_map = np.array([0, 1, 2, 3, 4])  # 0→0, 1→1, 2→2, 3→3, 4→4
+    augmented_samples.append((puzzle.copy(), solution.copy(), "original", identity_map))
 
     # Generate augmentations
     for i in range(num_augmentations):
         if augmentation_type == "digit_permutation":
-            aug_puzzle, aug_solution = simple_digit_augmentation(puzzle, solution)
+            aug_puzzle, aug_solution, digit_map = simple_digit_augmentation(
+                puzzle, solution
+            )
         else:
             # Fallback to original if augmentation type not supported
             aug_puzzle, aug_solution = puzzle.copy(), solution.copy()
+            digit_map = identity_map
 
-        augmented_samples.append((aug_puzzle, aug_solution, f"aug_{i}"))
+        augmented_samples.append((aug_puzzle, aug_solution, f"aug_{i}", digit_map))
 
     return augmented_samples
 
@@ -241,7 +246,11 @@ def build_dataset(config: dict[str, Any]) -> None:
         all_puzzles = []
         all_solutions = []
         all_identifiers = []
+        all_digit_maps = []  # Store digit mappings
         puzzle_groups = {}  # Dictionary: {group_id: [indices]}
+
+        # Define identity mapping for original puzzles
+        identity_map = np.array([0, 1, 2, 3, 4])  # 0→0, 1→1, 2→2, 3→3, 4→4
 
         for puzzle_id, puzzle_data in puzzles_dict.items():
             original_puzzle, original_solution = puzzle_data[0], puzzle_data[1]
@@ -254,24 +263,35 @@ def build_dataset(config: dict[str, Any]) -> None:
             all_puzzles.append(original_puzzle)
             all_solutions.append(original_solution)
             all_identifiers.append(f"{split_name}_{puzzle_id}_original")
+            all_digit_maps.append(identity_map)  # Identity mapping for original
             puzzle_groups[puzzle_id].append(len(all_puzzles) - 1)
 
             # Add augmentations
-            for aug_puzzle, aug_solution, aug_id in augmentations:
+            for aug_puzzle, aug_solution, aug_id, digit_map in augmentations:
                 all_puzzles.append(aug_puzzle)
                 all_solutions.append(aug_solution)
                 all_identifiers.append(f"{split_name}_{puzzle_id}_{aug_id}")
+                all_digit_maps.append(digit_map)
                 puzzle_groups[puzzle_id].append(len(all_puzzles) - 1)
 
         # Convert to numpy arrays
         all_puzzles = np.array(all_puzzles)
         all_solutions = np.array(all_solutions)
+        all_digit_maps = np.array(all_digit_maps)
 
         # Save data
         np.save(split_dir / "all__inputs.npy", all_puzzles)
         np.save(split_dir / "all__labels.npy", all_solutions)
-        np.save(split_dir / "puzzle_groups.npy", puzzle_groups)
-
+        np.save(
+            split_dir / "all__digit_maps.npy", all_digit_maps
+        )  # Save digit mappings
+        # Save puzzle_groups dictionary using pickle
+        # np.save does not safely support saving dictionaries
+        # puzzle_groups is a dictionary mapping each puzzle_id to a list of indices.
+        # Each list contains the indices (in all_puzzles/all_solutions) for the original puzzle
+        # and all its augmentations. This allows grouping all augmented samples with their source.
+        with open(split_dir / "puzzle_groups.pkl", "wb") as f:
+            pickle.dump(puzzle_groups, f)
         # Save identifiers
         with open(split_dir / "identifiers.json", "w") as f:
             json.dump(all_identifiers, f)
