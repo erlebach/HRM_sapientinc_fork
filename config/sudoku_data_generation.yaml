@@ -5,6 +5,6 @@ data_generation:
   val_size: 200
   test_size: 200
   num_augmentations: 20
-  augmentation_type: "digit_permutation"  # or "spatial_permutation"
-  ensure_no_equivalents: true  # Check for equivalent puzzles across splits
-  seed: 42  # For reproducible generation
+  augmentation_type: "digit_permutation"
+  ensure_no_equivalents: true  # Check for equivalent puzzles within each split
+  seed: 42

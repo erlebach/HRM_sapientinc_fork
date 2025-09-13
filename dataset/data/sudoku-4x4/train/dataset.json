@@ -1,1 +1,1 @@
-{"pad_id": 0, "ignore_label_id": 0, "blank_identifier_id": 0, "vocab_size": 5, "seq_len": 16, "num_puzzle_identifiers": 1, "total_groups": 973, "mean_puzzle_examples": 21.0, "sets": ["train", "val", "test"]}
+{"pad_id": 0, "ignore_label_id": 0, "blank_identifier_id": 0, "vocab_size": 5, "seq_len": 16, "num_puzzle_identifiers": 1, "total_groups": 973, "mean_puzzle_examples": 22.0, "sets": ["train", "val", "test"]}

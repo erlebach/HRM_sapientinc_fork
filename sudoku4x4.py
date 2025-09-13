@@ -40,6 +40,9 @@ sys.path.append("HRM_didactic")
 from pathlib import Path
 
 import yaml
+
+# Add import
+from dataset.sudoku_dataloader import create_dataloaders, create_evaluation_dataloader
 from hrm_model import create_hrm_model
 from utils.sudoku_augmentation import shuffle_4x4_sudoku, simple_digit_augmentation
 
@@ -548,14 +551,16 @@ def train_model(
     # Create save directory
     os.makedirs(training_cfg["save_dir"], exist_ok=True)
 
-    # Create data loaders with sample limits
-    print("Loading dataset...")
-    train_loader, val_loader, test_loader = create_data_loaders(
-        dataset_cfg["data_dir"],
-        training_cfg["batch_size"],
+    # Create data loaders based on configuration
+    use_augmentations = config["training"].get("use_augmentations", True)
+
+    train_loader, val_loader = create_dataloaders(
+        data_dir=dataset_cfg["data_dir"],
+        batch_size=training_cfg["batch_size"],
         max_train_samples=dataset_cfg.get("max_train_samples"),
         max_val_samples=dataset_cfg.get("max_val_samples"),
-        max_test_samples=dataset_cfg.get("max_test_samples"),
+        use_augmentations=use_augmentations,
+        shuffle_train=True,
     )
 
     # Create model using configuration

@@ -18,19 +18,22 @@ model:
   num_heads: 8
   intermediate_size: 1024
   max_seq_len: 16
-  num_puzzle_ids: 1
+  num_puzzle_ids: 1  # Only 1 puzzle type for now
   h_layers: 3
   l_layers: 3
   h_cycles: 2
   l_cycles: 2
-  halt_max_steps: 8
+  halt_max_steps: 10  # Change back to halt_max_steps
 
 # Training Configuration
 training:
-  num_epochs: 50
   batch_size: 8
-  learning_rate: 0.0001  # 1e-4 as float
+  learning_rate: 0.0001
+  num_epochs: 50
   weight_decay: 0.01
+  warmup_steps: 100 # not used
+  max_grad_norm: 1.0 # not used
+  use_augmentations: true  # NEW: Control augmentation usage
   device: "cpu"
   save_dir: "checkpoints_4x4_xx"
   log_file: "training_log.txt"
