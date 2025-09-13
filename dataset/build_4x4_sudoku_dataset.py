@@ -164,158 +164,115 @@ def build_dataset(config: dict[str, Any]) -> None:
     output_dir = Path(data_cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate base puzzles
-    print(f"Generating {data_cfg['train_size']} training puzzles...")
-    train_puzzles_dict = {}
-    for i in range(data_cfg["train_size"]):
-        puzzle, solution = generate_4x4_sudoku_puzzle()
-        train_puzzles_dict[i] = [puzzle, solution]
+    # Generate ALL puzzles first (before splitting)
+    total_puzzles = (
+        data_cfg["train_size"] + data_cfg["val_size"] + data_cfg["test_size"]
+    )
+    print(f"Generating {total_puzzles} total puzzles...")
 
-    print(f"Generating {data_cfg['val_size']} validation puzzles...")
-    val_puzzles_dict = {}
-    for i in range(data_cfg["val_size"]):
+    all_puzzles_dict = {}
+    for i in range(total_puzzles):
         puzzle, solution = generate_4x4_sudoku_puzzle()
-        val_puzzles_dict[i] = [puzzle, solution]
+        all_puzzles_dict[i] = [puzzle, solution]
 
-    print(f"Generating {data_cfg['test_size']} test puzzles...")
-    test_puzzles_dict = {}
-    for i in range(data_cfg["test_size"]):
-        puzzle, solution = generate_4x4_sudoku_puzzle()
-        test_puzzles_dict[i] = [puzzle, solution]
-
-    # Remove equivalent puzzles if requested
+    # Remove equivalent puzzles from entire dataset
     if data_cfg.get("ensure_no_equivalents", False):
-        print("Removing equivalent puzzles...")
-        # Convert dicts to lists for equivalence checking
-        train_puzzles = [train_puzzles_dict[i][0] for i in train_puzzles_dict]
-        train_solutions = [train_puzzles_dict[i][1] for i in train_puzzles_dict]
-        val_puzzles = [val_puzzles_dict[i][0] for i in val_puzzles_dict]
-        val_solutions = [val_puzzles_dict[i][1] for i in val_puzzles_dict]
-        test_puzzles = [test_puzzles_dict[i][0] for i in test_puzzles_dict]
-        test_solutions = [test_puzzles_dict[i][1] for i in test_puzzles_dict]
+        print("Removing equivalent puzzles from entire dataset...")
+        all_puzzles = [all_puzzles_dict[i][0] for i in all_puzzles_dict]
+        all_solutions = [all_puzzles_dict[i][1] for i in all_puzzles_dict]
 
-        # Check for equivalents
-        train_puzzles, train_solutions = ensure_no_equivalents(
-            train_puzzles, train_solutions
-        )
-        val_puzzles, val_solutions = ensure_no_equivalents(val_puzzles, val_solutions)
-        test_puzzles, test_solutions = ensure_no_equivalents(
-            test_puzzles, test_solutions
+        unique_puzzles, unique_solutions = ensure_no_equivalents(
+            all_puzzles, all_solutions
         )
 
-        # Rebuild dicts with filtered puzzles
-        train_puzzles_dict = {
-            i: [train_puzzles[i], train_solutions[i]] for i in range(len(train_puzzles))
-        }
-        val_puzzles_dict = {
-            i: [val_puzzles[i], val_solutions[i]] for i in range(len(val_puzzles))
-        }
-        test_puzzles_dict = {
-            i: [test_puzzles[i], test_solutions[i]] for i in range(len(test_puzzles))
+        # Rebuild dict with filtered puzzles
+        all_puzzles_dict = {
+            i: {"id": i, "puzzle": unique_puzzles[i], "solution": unique_solutions[i]}
+            for i in range(len(unique_puzzles))
         }
 
-        print(
-            f"After removing equivalents: {len(train_puzzles_dict)} train, {len(val_puzzles_dict)} val, {len(test_puzzles_dict)} test"
+        print(f"After removing equivalents: {len(all_puzzles_dict)} unique puzzles")
+
+    # After removing equivalents and before splitting, generate augmentations
+    print("Generating augmentations for all puzzles...")
+
+    # Define identity mapping for original puzzles
+    identity_map = np.array([0, 1, 2, 3, 4])  # 0→0, 1→1, 2→2, 3→3, 4→4
+
+    # Generate all the augmentations
+    augmentation_type = data_cfg["augmentation_type"]
+    num_augmentations = data_cfg["num_augmentations"]
+
+    for key, val in all_puzzles_dict.items():
+        puzzle_id = val["id"]
+        puzzle = val["puzzle"]
+        solution = val["solution"]
+
+        augmented_samples = generate_augmented_samples(
+            puzzle, solution, num_augmentations, augmentation_type
         )
 
-    # Generate augmented samples for each split
+        augmented_samples_dict = {}
+        for i in range(len(augmented_samples)):
+            augmented_samples_dict[i] = {
+                "id": (puzzle_id, i),
+                "puzzle": augmented_samples[i][0],
+                "solution": augmented_samples[i][1],
+                # "augmentation_id": augmented_samples[i][2],
+                "digit_map": augmented_samples[i][3],
+            }
+        all_puzzles_dict[key]["augmentations"] = augmented_samples_dict
+
+    print(f"Generated augmentations for {len(all_puzzles_dict)} puzzles")
+
+    # NOW split into train/val/test using the ratios
+    original_total = (
+        data_cfg["train_size"] + data_cfg["val_size"] + data_cfg["test_size"]
+    )
+    actual_total = len(all_puzzles_dict)
+
+    # Calculate ratios
+    rat1 = data_cfg["train_size"] / original_total  # train ratio
+    rat2 = data_cfg["val_size"] / original_total  # val ratio
+    rat3 = data_cfg["test_size"] / original_total  # test ratio
+
+    # Apply ratios to actual dataset size
+    train_size = int(actual_total * rat1)
+    val_size = int(actual_total * rat2)
+    test_size = actual_total - train_size - val_size  # Ensure we use all samples
+
+    print(
+        f"Original sizes: train={data_cfg['train_size']}, val={data_cfg['val_size']}, test={data_cfg['test_size']}"
+    )
+    print(f"New sizes: train={train_size}, val={val_size}, test={test_size}")
+    print(f"Total: {train_size + val_size + test_size} (should equal {actual_total})")
+
+    # Split the puzzles using the new sizes
+    base = 0
+    train_puzzles_dict = {i: all_puzzles_dict[base + i] for i in range(train_size)}
+    base = train_size
+    val_puzzles_dict = {i: all_puzzles_dict[base + i] for i in range(val_size)}
+    base = train_size + val_size
+    test_puzzles_dict = {i: all_puzzles_dict[base + i] for i in range(test_size)}
+    # print(test_puzzles_dict)
+    # quit()
+
+    # Save the split dictionaries directly
     for split_name, puzzles_dict in [
         ("train", train_puzzles_dict),
         ("val", val_puzzles_dict),
         ("test", test_puzzles_dict),
     ]:
-        print(f"Generating augmented samples for {split_name}...")
-
-        # Create split directory
         split_dir = output_dir / split_name
         split_dir.mkdir(exist_ok=True)
 
-        # Generate augmented samples for each puzzle
-        for puzzle_id, (puzzle, solution) in puzzles_dict.items():
-            augmented_samples = generate_augmented_samples(
-                puzzle,
-                solution,
-                data_cfg["num_augmentations"],
-                data_cfg["augmentation_type"],
-            )
+        # Save the entire dictionary structure
+        with open(split_dir / "puzzles_dict.pkl", "wb") as f:
+            pickle.dump(puzzles_dict, f)
 
-            # Append augmentations to the puzzle entry
-            puzzles_dict[puzzle_id].extend(augmented_samples)
+        print(f"Saved {split_name} dataset: {len(puzzles_dict)} puzzles")
 
-        # Flatten the data for saving
-        all_puzzles = []
-        all_solutions = []
-        all_identifiers = []
-        all_digit_maps = []  # Store digit mappings
-        puzzle_groups = {}  # Dictionary: {group_id: [indices]}
-
-        # Define identity mapping for original puzzles
-        identity_map = np.array([0, 1, 2, 3, 4])  # 0→0, 1→1, 2→2, 3→3, 4→4
-
-        for puzzle_id, puzzle_data in puzzles_dict.items():
-            original_puzzle, original_solution = puzzle_data[0], puzzle_data[1]
-            augmentations = puzzle_data[2:]  # All augmentations after the original
-
-            # Start a new group for this puzzle
-            puzzle_groups[puzzle_id] = []
-
-            # Add original puzzle
-            all_puzzles.append(original_puzzle)
-            all_solutions.append(original_solution)
-            all_identifiers.append(f"{split_name}_{puzzle_id}_original")
-            all_digit_maps.append(identity_map)  # Identity mapping for original
-            puzzle_groups[puzzle_id].append(len(all_puzzles) - 1)
-
-            # Add augmentations
-            for aug_puzzle, aug_solution, aug_id, digit_map in augmentations:
-                all_puzzles.append(aug_puzzle)
-                all_solutions.append(aug_solution)
-                all_identifiers.append(f"{split_name}_{puzzle_id}_{aug_id}")
-                all_digit_maps.append(digit_map)
-                puzzle_groups[puzzle_id].append(len(all_puzzles) - 1)
-
-        # Convert to numpy arrays
-        all_puzzles = np.array(all_puzzles)
-        all_solutions = np.array(all_solutions)
-        all_digit_maps = np.array(all_digit_maps)
-
-        # Save data
-        np.save(split_dir / "all__inputs.npy", all_puzzles)
-        np.save(split_dir / "all__labels.npy", all_solutions)
-        np.save(
-            split_dir / "all__digit_maps.npy", all_digit_maps
-        )  # Save digit mappings
-        # Save puzzle_groups dictionary using pickle
-        # np.save does not safely support saving dictionaries
-        # puzzle_groups is a dictionary mapping each puzzle_id to a list of indices.
-        # Each list contains the indices (in all_puzzles/all_solutions) for the original puzzle
-        # and all its augmentations. This allows grouping all augmented samples with their source.
-        with open(split_dir / "puzzle_groups.pkl", "wb") as f:
-            pickle.dump(puzzle_groups, f)
-        # Save identifiers
-        with open(split_dir / "identifiers.json", "w") as f:
-            json.dump(all_identifiers, f)
-
-        # Create metadata
-        metadata = PuzzleDatasetMetadata(
-            num_puzzles=len(puzzles_dict),
-            vocab_size=5,
-            ignore_label_id=0,
-            blank_identifier_id=0,
-            seq_len=16,
-            mean_puzzle_examples=len(all_puzzles) / len(puzzles_dict),
-            sets=["train", "val", "test"],
-            pad_id=0,
-            num_puzzle_identifiers=1,
-            total_groups=len(puzzles_dict),
-        )
-
-        with open(split_dir / "dataset.json", "w") as f:
-            json.dump(metadata.__dict__, f)
-
-        print(f"Saved {len(all_puzzles)} samples to {split_dir}")
-        print(f"  - {len(puzzles_dict)} original puzzles")
-        print(f"  - {len(all_puzzles) - len(puzzles_dict)} augmented samples")
+    print("Dataset generation complete!")
 
 
 def main():

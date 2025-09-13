@@ -41,6 +41,134 @@ from tqdm import tqdm
 from utils.sudoku_augmentation import shuffle_4x4_sudoku, simple_digit_augmentation
 
 
+# ---
+def debug_voting_process(input_ids, target_ids, model, device, num_augmentations=3):
+    """Debug the entire voting process step by step."""
+    print("=== DEBUGGING VOTING PROCESS ===")
+
+    # Take just the first sample for debugging
+    input_puzzle = input_ids[0].cpu().numpy().reshape(4, 4)
+    target_solution = target_ids[0].cpu().numpy().reshape(4, 4)
+
+    print(f"Original puzzle:\n{input_puzzle}")
+    print(f"Target solution:\n{target_solution}")
+
+    # Test no-voting prediction first
+    with torch.no_grad():
+        no_vote_output = model(input_ids[0:1], torch.tensor([0], device=device))
+        no_vote_pred = torch.argmax(no_vote_output["logits"], dim=-1)
+        no_vote_pred_np = no_vote_pred[0].cpu().numpy().reshape(4, 4)
+        print(f"No-voting prediction:\n{no_vote_pred_np}")
+        print(f"No-voting correct: {np.array_equal(no_vote_pred_np, target_solution)}")
+
+    # Now test voting
+    all_inputs = [input_ids[0]]
+    all_inv_maps = [torch.arange(5, device=device)]
+
+    for i in range(num_augmentations):
+        aug_puzzle, aug_solution, _, digit_map = generate_augmented_samples(
+            input_puzzle, target_solution, 1
+        )[0]
+
+        print(f"\nAugmentation {i+1}:")
+        print(f"Digit map: {digit_map}")
+        print(f"Aug puzzle:\n{aug_puzzle}")
+        print(f"Aug solution:\n{aug_solution}")
+
+        # Create inverse mapping
+        inv_map = torch.zeros_like(torch.tensor(digit_map, device=device))
+        inv_map[torch.tensor(digit_map, device=device)] = torch.arange(5, device=device)
+        print(f"Inverse map: {inv_map.cpu().numpy()}")
+
+        # Test the mapping
+        test_forward = digit_map[target_solution.flatten()]
+        test_backward = inv_map[torch.tensor(test_forward, device=device)].cpu().numpy()
+        print(f"Target forward: {test_forward}")
+        print(f"Target backward: {test_backward}")
+        print(
+            f"Mapping correct: {np.array_equal(test_backward, target_solution.flatten())}"
+        )
+
+        all_inputs.append(
+            torch.tensor(aug_puzzle.flatten(), dtype=torch.long, device=device)
+        )
+        all_inv_maps.append(inv_map)
+
+    # Run inference
+    all_inputs = torch.stack(all_inputs)
+    with torch.no_grad():
+        outputs = model(
+            all_inputs, torch.zeros(len(all_inputs), device=device, dtype=torch.long)
+        )
+        logits = outputs["logits"]
+
+    print(f"\nLogits shape: {logits.shape}")
+
+    # Show individual predictions before voting
+    print("\nIndividual predictions before voting:")
+    for k in range(logits.size(0)):
+        pred = torch.argmax(logits[k], dim=-1).cpu().numpy().reshape(4, 4)
+        print(f"Sample {k} prediction:\n{pred}")
+        if k == 0:
+            print("(This is the original - should match no-voting prediction)")
+
+    # Remap logits
+    remapped_logits = []
+    for k in range(logits.size(0)):
+        inv_perm = all_inv_maps[k]
+        remapped = logits[k, :, inv_perm]
+        remapped_logits.append(remapped)
+        print(
+            f"Sample {k} - Original logits max: {logits[k].max():.3f}, Remapped max: {remapped.max():.3f}"
+        )
+
+    remapped_logits = torch.stack(remapped_logits, dim=0)
+
+    # Show remapped predictions
+    print("\nRemapped predictions before voting:")
+    for k in range(remapped_logits.size(0)):
+        pred = torch.argmax(remapped_logits[k], dim=-1).cpu().numpy().reshape(4, 4)
+        print(f"Sample {k} remapped prediction:\n{pred}")
+
+    # Vote
+    voted_logits = remapped_logits.sum(dim=0)  # Sum across all samples
+    voted_pred = voted_logits.argmax(dim=-1)
+    voted_pred_np = voted_pred.cpu().numpy().reshape(4, 4)
+
+    print(f"\nVoted prediction:\n{voted_pred_np}")
+    print(f"Voted correct: {np.array_equal(voted_pred_np, target_solution)}")
+
+    print("=== END DEBUG ===")
+
+
+# ---
+
+
+# Add this debug function
+def debug_digit_mapping():
+    """Debug digit mapping logic."""
+    # Test with a simple example
+    digit_map = np.array([0, 3, 1, 4, 2])  # 0→0, 1→3, 2→1, 3→4, 4→2
+    print(f"Original digit_map: {digit_map}")
+
+    # Create inverse mapping
+    inv_map = np.zeros_like(digit_map)
+    inv_map[digit_map] = np.arange(5)
+    print(f"Inverse mapping: {inv_map}")
+
+    # Test round-trip
+    test_values = np.array([0, 1, 2, 3, 4])
+    forward = digit_map[test_values]
+    backward = inv_map[forward]
+    print(f"Test values: {test_values}")
+    print(f"Forward: {forward}")
+    print(f"Backward: {backward}")
+    print(f"Round-trip correct: {np.array_equal(test_values, backward)}")
+
+
+# Call this in your evaluate function before voting
+
+
 # Add this configuration loading function
 def load_config(config_path: str = "config/sudoku_config.yaml") -> dict[str, Any]:
     """Load configuration from YAML file.
@@ -260,9 +388,15 @@ def evaluate(
             input_ids = batch["input_ids"].to(device)
             target_ids = batch["target_ids"].to(device)  # Keep original solutions
             puzzle_ids = batch["puzzle_ids"].to(device)
+            print(f"{input_ids=}")
 
             if use_voting:
                 # ADD DEBUG STATEMENTS HERE
+                # debug_digit_mapping()
+                # debug_voting_process(
+                #     input_ids, target_ids, model, device, num_augmentations
+                # )
+
                 # print(f"DEBUG: Processing batch with {len(input_ids)} samples")
                 # print(f"DEBUG: Input shape: {input_ids.shape}")
                 # print(f"DEBUG: Target shape: {target_ids.shape}")

@@ -35,7 +35,7 @@ training:
   max_grad_norm: 1.0 # not used
   use_augmentations: true  # NEW: Control augmentation usage
   device: "mps"
-  save_dir: "checkpoints_4x4_zz1"
+  save_dir: "checkpoints_4x4_debug_zz1"
   log_file: "training_log.txt"
 
 # Evaluation Configuration

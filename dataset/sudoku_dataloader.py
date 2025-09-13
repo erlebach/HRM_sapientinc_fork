@@ -88,11 +88,16 @@ class SudokuDataset(Dataset):
         solution = torch.tensor(self.solutions[idx], dtype=torch.long)
         digit_map = torch.tensor(self.digit_maps[idx], dtype=torch.long)
 
+        # Get the actual puzzle ID for this sample
+        puzzle_id = self._get_puzzle_group_id(idx)
+
         return {
             "input_ids": puzzle.flatten(),
             "target_ids": solution.flatten(),
-            "puzzle_ids": torch.tensor(0, dtype=torch.long),  # Always use 0 for now
-            "digit_map": digit_map,  # Include digit mapping for voting
+            "puzzle_ids": torch.tensor(
+                puzzle_id, dtype=torch.long
+            ),  # Use actual puzzle ID
+            "digit_map": digit_map,
         }
 
     def _get_puzzle_group_id(self, idx: int) -> int:
