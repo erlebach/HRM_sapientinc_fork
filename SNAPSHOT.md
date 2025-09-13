@@ -3,19 +3,18 @@
 ## Current Architecture
 - **HRM Model**: Hierarchical Reasoning Machine with High-level (H) and Low-level (L) reasoning modules
 - **4x4 Sudoku Task**: Constraint satisfaction problem with 16 cells, 4 digits (1-4), 0 for blank
-- **Voting Mechanism**: Grid-level majority voting with Q-value weighting across augmented samples
-- **Configuration System**: YAML-based configuration for all parameters (dataset, model, training, evaluation)
-- **Batch Size Management**: Separate batch sizes for training (8) and evaluation (1)
-- **Status**: ✅ IMPLEMENTED AND TESTED - Code runs successfully
+- **Dataset Structure**: Dictionary-based with global indexing and persistent puzzle IDs
+- **Voting Mechanism**: Implemented but performs worse due to constraint violations
+- **Configuration System**: YAML-based configuration for all parameters
+- **Status**: ✅ DATASET ARCHITECTURE REBUILT - Clean, maintainable structure
 
 ## Active Features
-- **Model Performance**: 24% exact accuracy, 82.7% cell accuracy on laptop CPU (baseline)
-- **Voting Implementation**: 20 augmented samples per puzzle with grid-level voting
-- **Configuration Management**: Centralized YAML config with command-line overrides
-- **Dataset Support**: Both full (1000 train) and small (200 train) 4x4 Sudoku datasets
-- **Augmentation**: 3-10 augmentations per puzzle via digit permutation and grid transformations
-- **Error Handling**: Fixed learning rate type conversion and argument parsing
-- **Debugging Support**: Batch size 1 for evaluation enables easier debugging
+- **Dataset Generation**: 972 train, 194 val, 196 test puzzles with proper deduplication
+- **Data Structure**: `puzzle_dict[global_idx] = {"id": puzzle_id, "puzzle": ..., "augmentations": {...}}`
+- **Augmentation System**: Composite keys `(puzzle_id, aug_idx)` for unique identification
+- **Voting Analysis**: 3-4% worse performance due to constraint violation in majority voting
+- **Puzzle ID System**: Persistent IDs that travel with puzzles across splits
+- **Flexible Storage**: Dictionary-based pickle files instead of flattened arrays
 
 ## File Structure
 ```

@@ -1,5 +1,53 @@
 ---
 
+## 2025-01-27 - Fixed Voting Mechanism and Rebuilt Dataset Architecture
+
+### Completed Tasks ✅
+- [x] Identified and fixed critical bug in puzzle ID handling (always returning 0)
+- [x] Discovered fundamental flaw in voting approach for constraint satisfaction problems
+- [x] Completely rebuilt dataset generation architecture with proper structure
+- [x] Implemented global indexing system with persistent puzzle IDs
+- [x] Fixed dataset splitting to maintain proper ratios after deduplication
+- [x] Switched to dictionary-based data storage for better flexibility
+
+### Files Created/Modified
+- `dataset/build_4x4_sudoku_dataset.py` - Complete architectural rebuild
+- `dataset/sudoku_dataloader.py` - Needs update for new dictionary structure
+- `sudoku4x4.py` - Debug functions added, voting mechanism analyzed
+- `utils/sudoku_augmentation.py` - Enhanced documentation
+
+### Key Discoveries
+- **Voting Performance Issue**: Voting consistently performs 3-4% worse than no-voting
+- **Root Cause**: Majority voting per cell breaks Sudoku constraints (cells not independent)
+- **Puzzle ID Bug**: Dataloader was returning puzzle content as input_ids instead of puzzle IDs
+- **Architecture Problem**: Early train/val/test split caused inconsistent puzzle generation
+
+### Technical Implementation
+- **New Data Structure**: `puzzle_dict[global_idx] = {"id": puzzle_id, "puzzle": ..., "solution": ..., "augmentations": {...}}`
+- **Composite Keys**: Augmentations use `(puzzle_id, aug_idx)` for unique identification
+- **Global Indexing**: Sequential numbering across all samples (original + augmentations)
+- **Ratio-Based Splitting**: Maintains original proportions after deduplication
+- **Dictionary Storage**: Saves clean structure as pickle files instead of flattened arrays
+
+### Performance Results
+- **Dataset Generation**: 972 train, 194 val, 196 test puzzles (after deduplication)
+- **Voting Analysis**: 3-4% worse performance due to constraint violation
+- **Architecture**: Much cleaner, more maintainable code structure
+
+### Key Insights
+- **Constraint Satisfaction**: Naive majority voting inappropriate for Sudoku
+- **Data Structure**: Dictionary approach much more flexible than arrays
+- **Puzzle Identity**: Persistent IDs essential for proper model training
+- **Code Clarity**: Complex array manipulations replaced with clean dictionary access
+
+### Notes
+- Voting mechanism works correctly but hurts performance due to domain constraints
+- New architecture supports different processing for training vs evaluation
+- Ready to update dataloader for new dictionary structure
+- Much cleaner separation of concerns between dataset builder and dataloader
+
+---
+
 ## 2025-01-27 - Successfully Implemented and Tested YAML Configuration System
 
 ### Completed Tasks ✅
