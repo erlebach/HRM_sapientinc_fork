@@ -865,6 +865,11 @@ def main():
         help="Override learning rate from config",
     )
     parser.add_argument(
+        "--save_dir",
+        type=str,
+        help="Override save directory from config",
+    )
+    parser.add_argument(
         "--use_voting",
         action="store_true",
         help="Override to enable voting",
@@ -889,6 +894,8 @@ def main():
         config["training"]["batch_size"] = args.batch_size
     if args.learning_rate:
         config["training"]["learning_rate"] = args.learning_rate
+    if args.save_dir:  # NEW: Add this line
+        config["training"]["save_dir"] = args.save_dir
     if args.use_voting:
         config["evaluation"]["use_voting"] = True
     if args.no_voting:
@@ -898,9 +905,39 @@ def main():
     torch.manual_seed(42)
     np.random.seed(42)
 
+    # Save the final configuration to save directory
+    save_dir = config["training"]["save_dir"]  # Use save_dir instead of data_dir
+    config_filename = Path(args.config).name  # Get just the filename
+    config_output_path = Path(save_dir) / config_filename
+
+    print(f"Saving final configuration to: {config_output_path}", flush=True)
+    with Path(config_output_path).open("w") as f:
+        yaml.dump(config, f, default_flow_style=False, indent=2)
+
+    # Save source files if specified in config
+    if "storage" in config and "save_files" in config["storage"]:
+        files_to_save = config["storage"]["save_files"]
+        print(f"Saving {len(files_to_save)} source files to: {save_dir}")
+
+        for file_path in files_to_save:
+            source_file = Path(file_path)
+            if source_file.exists():
+                dest_file = Path(save_dir) / source_file.name
+                print(f"  Copying {file_path} -> {dest_file}")
+
+                # Copy the file
+                with source_file.open("r") as src, dest_file.open("w") as dst:
+                    dst.write(src.read())
+            else:
+                print(f"  Warning: File {file_path} not found, skipping...")
+
+        print("Source files saved successfully!")
+    else:
+        print("No source files specified in config.storage.save_files")
+
     # Check if data directory exists
-    if not os.path.exists(config["dataset"]["data_dir"]):
-        print(f"Error: Data directory {config['dataset']['data_dir']} does not exist!")
+    if not Path(save_dir).exists():
+        print(f"Error: Data directory {save_dir} does not exist!")
         print("Please run the dataset generation first:")
         print("python dataset/build_4x4_sudoku_dataset.py")
         return

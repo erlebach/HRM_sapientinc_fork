@@ -53,3 +53,6 @@ data_generation:
   val_size: 200
   test_size: 200
   num_aug: 3
+
+storage:
+  save_files: ['sudoku4x4.py', "dataset/build_4x4_sudoku_dataset.py", "dataset/sudoku_dataloader.py"]
