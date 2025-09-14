@@ -23,7 +23,7 @@ model:
   l_layers: 3
   h_cycles: 2
   l_cycles: 2
-  halt_max_steps: 8
+  halt_max_steps: 16
 
 # Training Configuration
 training:
@@ -40,7 +40,7 @@ training:
 
 # Evaluation Configuration
 evaluation:
-  batch_size: 1
+  batch_size: 1  # Must be 1 if use_voting
   use_voting: true
   num_augmentations: 20
   show_examples_after: true

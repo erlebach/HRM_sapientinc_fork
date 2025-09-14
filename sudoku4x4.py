@@ -166,6 +166,44 @@ def debug_digit_mapping():
     print(f"Round-trip correct: {np.array_equal(test_values, backward)}")
 
 
+# Add this function after the debug_digit_mapping function (around line 167):
+
+
+def verify_inverse_mapping():
+    """Verify that the inverse mapping computation is correct."""
+    print("=== VERIFYING INVERSE MAPPING ===")
+
+    # Test with a known digit_map
+    digit_map = np.array([0, 3, 1, 4, 2])  # 0→0, 1→3, 2→1, 3→4, 4→2
+    print(f"Original digit_map: {digit_map}")
+
+    # Current method
+    inv_map = np.zeros_like(digit_map)
+    inv_map[digit_map] = np.arange(5)
+    print(f"Computed inverse_map: {inv_map}")
+
+    # Test round-trip
+    test_values = np.array([0, 1, 2, 3, 4])
+    forward = digit_map[test_values]
+    backward = inv_map[forward]
+    print(f"Test values: {test_values}")
+    print(f"Forward mapping: {forward}")
+    print(f"Backward mapping: {backward}")
+    print(f"Round-trip correct: {np.array_equal(test_values, backward)}")
+
+    # Verify the inverse property
+    print(f"\nVerification:")
+    for i in range(5):
+        original = i
+        mapped = digit_map[original]
+        unmapped = inv_map[mapped]
+        print(
+            f"{original} → {mapped} → {unmapped} {'✓' if original == unmapped else '✗'}"
+        )
+
+    print("=== END VERIFICATION ===")
+
+
 # Call this in your evaluate function before voting
 
 
@@ -271,19 +309,13 @@ def train_epoch(
     pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(pbar):
         # Move to device
-        # print(f"==> Batch:  {batch}:")
         puzzle_ids = batch["puzzle_id"]
         puzzles = batch["puzzle"]
         solutions = batch["solution"]
-        digit_maps = batch["digit_map"]
         solutions = solutions.to(device)
         puzzles = puzzles.reshape(puzzles.shape[0], -1).to(device)
         puzzle_ids = torch.zeros(puzzles.shape[0], dtype=torch.long).to(device)
         target_ids = solutions.reshape(solutions.shape[0], -1).to(device)
-        # print(f"{puzzle_ids=}")
-        # print(f"{puzzles=}")
-        # print(f"{puzzles.shape=}")
-        # print(f"{puzzle_ids.shape=}")
 
         # Forward pass
         optimizer.zero_grad()
@@ -291,11 +323,6 @@ def train_epoch(
 
         # ADD DEBUG STATEMENTS HERE
         predictions = torch.argmax(outputs["logits"], dim=-1)
-        # print(f"DEBUG: Training - Batch {batch_idx} predictions: {predictions[0]}")
-        # print(f"DEBUG: Training - Batch {batch_idx} targets: {target_ids[0]}")
-        # print(
-        #     f"DEBUG: Training - Batch {batch_idx} logits sample: {outputs['logits'][0, :5, :5]}"
-        # )
 
         # Compute loss
         loss, loss_components = compute_loss(outputs, target_ids)
@@ -392,6 +419,14 @@ def evaluate(
     total_examples = 0
     exact_matches = 0
 
+    # Check that batch size is 1 for evaluation
+    batch_size = val_loader.batch_size
+    if batch_size != 1:
+        raise ValueError(
+            f"Evaluation requires batch_size=1 for correct voting logic, but got batch_size={batch_size}. "
+            "Please set batch_size=1 in your DataLoader for validation."
+        )
+
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="Evaluating"):
             # Move to device
@@ -413,21 +448,15 @@ def evaluate(
             else:
                 puzzle_id_value = puzzle_ids
 
-            puzzle_ids_tensor = torch.full(
-                (puzzles.size(0),), puzzle_id_value, device=device, dtype=torch.long
+            # puzzle_ids_tensor = torch.full(
+            #     (puzzles.size(0),), puzzle_id_value, device=device, dtype=torch.long
+            # )
+            # print("puzzles.size(0)= ", puzzles.size(0))
+            puzzle_ids_tensor = torch.zeros(
+                puzzles.size(0), device=device, dtype=torch.long
             )
 
             if use_voting:
-                # ADD DEBUG STATEMENTS HERE
-                # debug_digit_mapping()
-                # debug_voting_process(
-                #     input_ids, target_ids, model, device, num_augmentations
-                # )
-
-                # print(f"DEBUG: Processing batch with {len(input_ids)} samples")
-                # print(f"DEBUG: Input shape: {input_ids.shape}")
-                # print(f"DEBUG: Target shape: {target_ids.shape}")
-
                 # Generate all augmented samples for the batch
                 all_inputs = []
                 all_inv_maps = []  # Store inverse digit mappings
@@ -459,15 +488,17 @@ def evaluate(
 
                         # Create inverse mapping
                         inv_map = torch.empty_like(
-                            torch.tensor(digit_map, device=device)
+                            torch.tensor(digit_map, device=device),
                         )
                         inv_map[torch.tensor(digit_map, device=device)] = torch.arange(
                             vocab_size, device=device
                         )
                         all_inv_maps.append(inv_map)
+                        # Verify that the inverse mapping is correct. DO NOT REMOVE.
+                        # verify_inverse_mapping()  # Verify the inverse mapping is correct
 
-                # Stack all samples
-                all_inputs = torch.stack(all_inputs)
+                # Stack all samples (original + augmented)
+                all_inputs = torch.stack(all_inputs)  #  [batch*(A+1), seq_len]
 
                 # Run inference on all samples
                 outputs = model(
@@ -493,8 +524,6 @@ def evaluate(
                 voted_logits = remapped_logits.sum(dim=1)  # [batch, seq_len, vocab]
                 predictions = voted_logits.argmax(dim=-1)  # [batch, seq_len]
 
-                # print(f"DEBUG: Voting - First puzzle prediction: {predictions[0]}")
-
                 # Compute loss on original samples only (using original targets)
                 original_outputs = model(input_ids, puzzle_ids_tensor)
                 loss, loss_components = compute_loss(original_outputs, target_ids)
@@ -504,16 +533,6 @@ def evaluate(
                 outputs = model(input_ids, puzzle_ids_tensor)
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
-                # print(f"DEBUG: No-voting - First puzzle prediction: {predictions[0]}")
-
-                # ADD DEBUG STATEMENTS HERE
-                # print(f"DEBUG: No voting - Input shape: {input_ids.shape}")
-                # print(f"DEBUG: No voting - Target shape: {target_ids.shape}")
-                # print(f"DEBUG: No voting - Predictions shape: {predictions.shape}")
-                # print(f"DEBUG: No voting - First prediction: {predictions[0]}")
-                # print(f"DEBUG: No voting - First target: {target_ids[0]}")
-                # diagnostic = compute_diagnostic_quantity(predictions, target_ids)
-                # print(f"DEBUG: No voting evaluation diagnostic: {diagnostic}")
 
             # Update metrics
             total_loss += loss_components["total_loss"]
@@ -652,7 +671,9 @@ def train_model(
     print()
 
     # Create save directory
-    os.makedirs(training_cfg["save_dir"], exist_ok=True)
+    from pathlib import Path
+
+    Path(training_cfg["save_dir"]).mkdir(parents=True, exist_ok=True)
 
     # Create data loaders based on configuration
     use_augmentations = config["training"].get("use_augmentations", True)
@@ -705,8 +726,8 @@ def train_model(
     val_accuracies = []
 
     # Open log file
-    log_path = os.path.join(training_cfg["save_dir"], training_cfg["log_file"])
-    with open(log_path, "w", buffering=1) as log_f:
+    log_path = Path(training_cfg["save_dir"]) / training_cfg["log_file"]
+    with Path(log_path).open("w", buffering=1) as log_f:
         log_f.write(
             "Epoch,Train_Loss,Val_Loss,Val_Exact_Accuracy,Val_Cell_Accuracy,Time\n"
         )
@@ -744,7 +765,7 @@ def train_model(
                         "val_exact_accuracy": val_metrics["val_exact_accuracy"],
                         "val_cell_accuracy": val_metrics["val_cell_accuracy"],
                     },
-                    os.path.join(training_cfg["save_dir"], "best_model.pt"),
+                    Path(training_cfg["save_dir"]) / "best_model.pt",
                 )
 
             # Save checkpoint
@@ -757,7 +778,7 @@ def train_model(
                     "val_exact_accuracy": val_metrics["val_exact_accuracy"],
                     "val_cell_accuracy": val_metrics["val_cell_accuracy"],
                 },
-                os.path.join(training_cfg["save_dir"], f"checkpoint_epoch_{epoch}.pt"),
+                Path(training_cfg["save_dir"]) / f"checkpoint_epoch_{epoch}.pt",
             )
 
             # Track losses and accuracies
@@ -836,7 +857,7 @@ def train_model(
 
 
 def main():
-    """Main function with command line argument parsing."""
+    """Parse command line arguments and run the main training routine."""
     parser = argparse.ArgumentParser(description="Train HRM on 4x4 Sudoku")
     parser.add_argument(
         "--config",
