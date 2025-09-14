@@ -1,13 +1,13 @@
 # Data Generation Configuration
 data_generation:
   output_dir: "dataset/data/sudoku-4x4"
-  # train_size: 1000
-  train_size: 10
-  val_size: 4
-  # val_size: 20
-  test_size: 4
-  # test_size: 200
-  num_augmentations: 5
+  train_size: 1000
+  # train_size: 10
+  # val_size: 4
+  val_size: 200
+  # test_size: 4
+  test_size: 200
+  num_augmentations: 100
   augmentation_type: "digit_permutation"
   ensure_no_equivalents: true  # Check for equivalent puzzles within each split
   seed: 43

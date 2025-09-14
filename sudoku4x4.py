@@ -395,10 +395,27 @@ def evaluate(
     with torch.no_grad():
         for batch in tqdm(val_loader, desc="Evaluating"):
             # Move to device
-            input_ids = batch["input_ids"].to(device)
-            target_ids = batch["target_ids"].to(device)  # Keep original solutions
-            puzzle_ids = batch["puzzle_ids"].to(device)
-            print(f"{input_ids=}")
+            puzzles = batch["puzzles"].to(device)  # Shape: [batch_size, 14, 4, 4]
+            solutions = batch["solutions"].to(device)  # Shape: [batch_size, 14, 4, 4]
+            puzzle_ids = batch["puzzle_id"]  # Single puzzle group ID
+            global_ids = batch["global_ids"]  # List of (puzzle_id, aug_idx) tuples
+            digit_maps = batch["digit_maps"]  # Shape: [batch_size, 14, 5]
+
+            # For evaluation, we want to use the original puzzle (index 0) as input
+            input_ids = puzzles[:, 0, :, :].flatten(1)  # Shape: [batch_size, 16]
+            target_ids = solutions[:, 0, :, :].flatten(1)  # Shape: [batch_size, 16]
+
+            # For puzzle_ids, since all samples in a group belong to the same puzzle,
+            # we can use a constant or the actual puzzle group ID
+            # Extract the scalar value from puzzle_ids if it's a tensor
+            if isinstance(puzzle_ids, torch.Tensor):
+                puzzle_id_value = puzzle_ids.item()
+            else:
+                puzzle_id_value = puzzle_ids
+
+            puzzle_ids_tensor = torch.full(
+                (puzzles.size(0),), puzzle_id_value, device=device, dtype=torch.long
+            )
 
             if use_voting:
                 # ADD DEBUG STATEMENTS HERE
@@ -454,7 +471,8 @@ def evaluate(
 
                 # Run inference on all samples
                 outputs = model(
-                    all_inputs, puzzle_ids.repeat_interleave(num_augmentations + 1)
+                    all_inputs,
+                    puzzle_ids_tensor.repeat_interleave(num_augmentations + 1),
                 )
                 logits = outputs["logits"]  # [batch*(A+1), seq_len, vocab]
 
@@ -478,12 +496,12 @@ def evaluate(
                 # print(f"DEBUG: Voting - First puzzle prediction: {predictions[0]}")
 
                 # Compute loss on original samples only (using original targets)
-                original_outputs = model(input_ids, puzzle_ids)
+                original_outputs = model(input_ids, puzzle_ids_tensor)
                 loss, loss_components = compute_loss(original_outputs, target_ids)
 
             else:
                 # Standard evaluation (no voting)
-                outputs = model(input_ids, puzzle_ids)
+                outputs = model(input_ids, puzzle_ids_tensor)
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
                 # print(f"DEBUG: No-voting - First puzzle prediction: {predictions[0]}")

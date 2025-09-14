@@ -283,8 +283,6 @@ class SudokuValidationDataset(Dataset):
 
             digit_maps.append(sample["digit_map"])
 
-        print("after gordon")
-
         return {
             "puzzle_id": puzzle_group["puzzle_id"],
             "puzzles": torch.stack(puzzles),  # Shape: [14, 4, 4]
