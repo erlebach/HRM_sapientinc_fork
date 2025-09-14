@@ -271,13 +271,23 @@ def train_epoch(
     pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
     for batch_idx, batch in enumerate(pbar):
         # Move to device
-        input_ids = batch["input_ids"].to(device)
-        target_ids = batch["target_ids"].to(device)
-        puzzle_ids = batch["puzzle_ids"].to(device)
+        # print(f"==> Batch:  {batch}:")
+        puzzle_ids = batch["puzzle_id"]
+        puzzles = batch["puzzle"]
+        solutions = batch["solution"]
+        digit_maps = batch["digit_map"]
+        solutions = solutions.to(device)
+        puzzles = puzzles.reshape(puzzles.shape[0], -1).to(device)
+        puzzle_ids = torch.zeros(puzzles.shape[0], dtype=torch.long).to(device)
+        target_ids = solutions.reshape(solutions.shape[0], -1).to(device)
+        # print(f"{puzzle_ids=}")
+        # print(f"{puzzles=}")
+        # print(f"{puzzles.shape=}")
+        # print(f"{puzzle_ids.shape=}")
 
         # Forward pass
         optimizer.zero_grad()
-        outputs = model(input_ids, puzzle_ids)
+        outputs = model(puzzles, puzzle_ids)
 
         # ADD DEBUG STATEMENTS HERE
         predictions = torch.argmax(outputs["logits"], dim=-1)
