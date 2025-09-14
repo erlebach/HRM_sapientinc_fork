@@ -549,6 +549,8 @@ def evaluate(
             # Exact match accuracy (entire puzzle correct) - compare voted predictions to true solutions
             exact_match = torch.all(predictions == target_ids, dim=1)
             exact_matches += exact_match.sum().item()
+            print(f"==> {exact_match.sum().device=}")
+            print(f"==> {exact_match.sum().item=}")
 
             # Cell-wise accuracy (ignoring padding/blank cells)
             # Only count non-zero cells in targets
