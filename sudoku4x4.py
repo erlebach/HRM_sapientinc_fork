@@ -531,7 +531,8 @@ def evaluate(
             else:
                 # Standard evaluation (no voting)
                 outputs = model(input_ids, puzzle_ids_tensor)
-                print(f"==> {outputs.device=}")
+                for k, v in outputs.items():
+                    print(f"==> {k}={v.device}")
                 print(f"==> {target_ids.device=}")
                 print(f"==> {target_ids.shape=}")
                 print(f"==> {target_ids}")
