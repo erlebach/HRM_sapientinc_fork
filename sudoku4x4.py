@@ -419,6 +419,11 @@ def evaluate(
     total_examples = 0
     exact_matches = 0
 
+    # Initialize GPU tensors for accumulation
+    exact_matches_tensor = torch.tensor(0, dtype=torch.long, device=device)
+    total_correct_tensor = torch.tensor(0, dtype=torch.long, device=device)
+    total_examples_tensor = torch.tensor(0, dtype=torch.long, device=device)
+
     # Check that batch size is 1 for evaluation
     batch_size = val_loader.batch_size
     if batch_size != 1:
@@ -531,12 +536,12 @@ def evaluate(
             else:
                 # Standard evaluation (no voting)
                 outputs = model(input_ids, puzzle_ids_tensor)
-                for k, v in outputs.items():
-                    print(f"==> {k}={v.device}")
-                print(f"==> {target_ids.device=}")
-                print(f"==> {target_ids.shape=}")
-                print(f"==> {target_ids}")
-                quit()
+                # for k, v in outputs.items():
+                #     print(f"==> {k}={v.device}")
+                # print(f"==> {target_ids.device=}")
+                # print(f"==> {target_ids.shape=}")
+                # print(f"==> {target_ids}")
+                # quit()
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
 
@@ -548,17 +553,20 @@ def evaluate(
 
             # Exact match accuracy (entire puzzle correct) - compare voted predictions to true solutions
             exact_match = torch.all(predictions == target_ids, dim=1)
-            exact_matches += exact_match.sum().item()
-            print(f"==> {exact_match.sum().device=}")
-            print(f"==> {exact_match.sum().item()=}")
+            exact_matches_tensor += exact_match.sum()  # Stay on GPU
 
             # Cell-wise accuracy (ignoring padding/blank cells)
             # Only count non-zero cells in targets
             non_zero_mask = target_ids != 0
             if non_zero_mask.any():
                 correct_cells = (predictions == target_ids) & non_zero_mask
-                total_correct += correct_cells.sum().item()
-                total_examples += non_zero_mask.sum().item()
+                total_correct_tensor += correct_cells.sum()  # Stay on GPU
+                total_examples_tensor += non_zero_mask.sum()  # Stay on GPU
+
+    # Convert to CPU only at the end
+    exact_matches = exact_matches_tensor.cpu().item()
+    total_correct = total_correct_tensor.cpu().item()
+    total_examples = total_examples_tensor.cpu().item()
 
     # Calculate accuracies
     exact_accuracy = exact_matches / (len(val_loader.dataset))
