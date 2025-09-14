@@ -204,7 +204,7 @@ def build_dataset(config: dict[str, Any]) -> None:
     num_augmentations = data_cfg["num_augmentations"]
 
     for key, val in all_puzzles_dict.items():
-        puzzle_id = val["id"]
+        puzzle_group_id = key  # This is the global puzzle group ID (0, 1, 2, ...)
         puzzle = val["puzzle"]
         solution = val["solution"]
 
@@ -215,10 +215,9 @@ def build_dataset(config: dict[str, Any]) -> None:
         augmented_samples_dict = {}
         for i in range(len(augmented_samples)):
             augmented_samples_dict[i] = {
-                "id": (puzzle_id, i),
+                "id": (puzzle_group_id, i),  # (0,0), (0,1), (0,2), etc.
                 "puzzle": augmented_samples[i][0],
                 "solution": augmented_samples[i][1],
-                # "augmentation_id": augmented_samples[i][2],
                 "digit_map": augmented_samples[i][3],
             }
         all_puzzles_dict[key]["augmentations"] = augmented_samples_dict

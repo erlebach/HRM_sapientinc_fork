@@ -3,18 +3,18 @@
 ## Current Architecture
 - **HRM Model**: Hierarchical Reasoning Machine with High-level (H) and Low-level (L) reasoning modules
 - **4x4 Sudoku Task**: Constraint satisfaction problem with 16 cells, 4 digits (1-4), 0 for blank
-- **Dataset Structure**: Dictionary-based with global indexing and persistent puzzle IDs
-- **Voting Mechanism**: Implemented but performs worse due to constraint violations
+- **Dual-Format Dataloader**: Training uses tuples, validation uses grouped dictionaries
+- **Global ID System**: Proper (puzzle_id, aug_idx) tuple structure for puzzle grouping
 - **Configuration System**: YAML-based configuration for all parameters
-- **Status**: ✅ DATASET ARCHITECTURE REBUILT - Clean, maintainable structure
+- **Status**: ✅ DATALOADER ARCHITECTURE COMPLETE - Ready for model training
 
 ## Active Features
 - **Dataset Generation**: 972 train, 194 val, 196 test puzzles with proper deduplication
-- **Data Structure**: `puzzle_dict[global_idx] = {"id": puzzle_id, "puzzle": ..., "augmentations": {...}}`
-- **Augmentation System**: Composite keys `(puzzle_id, aug_idx)` for unique identification
-- **Voting Analysis**: 3-4% worse performance due to constraint violation in majority voting
-- **Puzzle ID System**: Persistent IDs that travel with puzzles across splits
-- **Flexible Storage**: Dictionary-based pickle files instead of flattened arrays
+- **Dual-Format Dataloader**: Training and validation use different data structures
+- **Puzzle Grouping**: 14 samples per group (1 original + 13 augmentations)
+- **Global ID System**: Clean tuple format (13, 0), (13, 1), etc.
+- **Augmentation Control**: Flexible training with/without augmentations
+- **Validation Grouping**: Always uses all augmentations for proper evaluation
 
 ## File Structure
 ```
