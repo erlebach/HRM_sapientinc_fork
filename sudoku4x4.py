@@ -531,6 +531,11 @@ def evaluate(
             else:
                 # Standard evaluation (no voting)
                 outputs = model(input_ids, puzzle_ids_tensor)
+                print(f"==> {outputs.device=}")
+                print(f"==> {target_ids.device=}")
+                print(f"==> {target_ids.shape=}")
+                print(f"==> {target_ids}")
+                quit()
                 loss, loss_components = compute_loss(outputs, target_ids)
                 predictions = torch.argmax(outputs["logits"], dim=-1)
 
@@ -968,6 +973,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if torch.cuda.is_available():
-        print("cuda is available")
     main()
