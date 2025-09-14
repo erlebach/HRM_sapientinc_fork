@@ -968,4 +968,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if torch.cuda.is_available():
+        print("cuda is available")
     main()
